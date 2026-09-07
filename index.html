@@ -110,16 +110,11 @@
   .chip.period{ padding:8px 0; width:38px; text-align:center; border-radius:8px; }
 
   /* 학생 선택 */
-  .mode-toggle{ margin-bottom:10px; }
-  .browse-row{ display:flex; gap:8px; margin-bottom:10px; }
-  .browse-row select{
-    flex:1; border:1px solid var(--border); border-radius:8px; padding:11px 10px;
-    font-size:14px; font-family:inherit; color:var(--text); background:#fff;
-  }
   #student-results{
     background:#fff; border:1px solid var(--border); border-radius:8px;
-    max-height:260px; overflow-y:auto; margin-top:2px;
+    max-height:280px; overflow-y:auto;
   }
+  #student-results:not(:empty){ margin-top:8px; }
   .student-opt{ padding:10px 12px; font-size:14px; cursor:pointer; border-bottom:1px solid #F1F1F1; display:flex; justify-content:space-between; align-items:center; }
   .student-opt:last-child{ border-bottom:none; }
   .student-opt:hover, .student-opt.active{ background:#F1F6FE; }
@@ -218,20 +213,9 @@
             <span class="field-label">학생 | Student</span>
 
             <div id="student-picker">
-              <div class="chip-group mode-toggle" id="student-mode-group">
-                <div class="chip selected" data-mode="browse">학년-반 | Grade-Class</div>
-                <div class="chip" data-mode="search">검색 | Search</div>
-              </div>
-
-              <div id="browse-mode" class="browse-row">
-                <select id="grade-select"><option value="">학년 | Grade</option></select>
-                <select id="cls-select"><option value="">반 | Class</option></select>
-              </div>
-
-              <div id="search-mode" style="display:none;">
-                <input type="text" id="student-search" placeholder="이름으로 검색 | Search by name">
-              </div>
-
+              <input type="text" id="student-search" placeholder="이름으로 검색 | Search by name">
+              <div class="chip-group" id="grade-filter-group" style="margin-top:8px;"></div>
+              <div class="chip-group" id="cls-filter-group" style="margin-top:8px;"></div>
               <div id="student-results"></div>
             </div>
 
@@ -442,10 +426,13 @@ async function loadStudentRoster() {
       grade: s.grade || "", cls: s.cls || "", num: s.num || "", schoolLevel: s.schoolLevel || ""
     });
   });
-  populateGradeOptions();
+  populateFilterChips();
 }
 
 const resultsEl = document.getElementById("student-results");
+const searchInput = document.getElementById("student-search");
+let filterGrade = null;
+let filterCls = null;
 
 function renderStudentResults(list, emptyMsg) {
   if (list.length === 0) {
@@ -472,66 +459,53 @@ resultsEl.addEventListener("click", (e) => {
   updateSubmitState();
 });
 
-// ----- 모드 전환 (학년-반 / 검색) -----
-document.getElementById("student-mode-group").addEventListener("click", (e) => {
-  const chip = e.target.closest(".chip");
-  if (!chip) return;
-  document.querySelectorAll("#student-mode-group .chip").forEach(c => c.classList.remove("selected"));
-  chip.classList.add("selected");
-  const mode = chip.dataset.mode;
-  document.getElementById("browse-mode").style.display = mode === "browse" ? "flex" : "none";
-  document.getElementById("search-mode").style.display = mode === "search" ? "block" : "none";
-  resultsEl.innerHTML = "";
-  if (mode === "search") document.getElementById("student-search").focus();
-});
-
-// ----- 학년-반 브라우징 -----
-const gradeSelect = document.getElementById("grade-select");
-const clsSelect = document.getElementById("cls-select");
-
-function populateGradeOptions() {
+// ----- 학년/반 칩 (분류·상세와 동일한 토글 버튼 패턴) -----
+function populateFilterChips() {
   const grades = [...new Set(studentRoster.map(s => s.grade).filter(g => g !== ""))]
     .sort((a, b) => Number(a) - Number(b));
-  gradeSelect.innerHTML = `<option value="">학년 | Grade</option>` +
-    grades.map(g => `<option value="${g}">${g}학년 | Grade ${g}</option>`).join("");
+  const clsValues = [...new Set(studentRoster.map(s => s.cls).filter(c => c !== ""))].sort();
+
+  document.getElementById("grade-filter-group").innerHTML = grades
+    .map(g => `<div class="chip" data-grade="${g}">${g}학년 | Grade ${g}</div>`).join("");
+  document.getElementById("cls-filter-group").innerHTML = clsValues
+    .map(c => `<div class="chip" data-cls="${c}">${c}반 | Class ${c}</div>`).join("");
 }
-gradeSelect.addEventListener("change", () => {
-  const grade = gradeSelect.value;
-  const clsValues = [...new Set(studentRoster.filter(s => s.grade === grade).map(s => s.cls).filter(c => c !== ""))].sort();
-  if (clsValues.length === 0) {
-    clsSelect.innerHTML = `<option value="">-</option>`;
-    clsSelect.disabled = true;
-  } else {
-    clsSelect.disabled = false;
-    clsSelect.innerHTML = `<option value="">반 | Class</option>` +
-      clsValues.map(c => `<option value="${c}">${c}반 | Class ${c}</option>`).join("");
-  }
-  updateBrowseResults();
+document.getElementById("grade-filter-group").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  const already = chip.classList.contains("selected");
+  document.querySelectorAll("#grade-filter-group .chip").forEach(c => c.classList.remove("selected"));
+  filterGrade = already ? null : chip.dataset.grade;
+  if (!already) chip.classList.add("selected");
+  updateStudentResults();
 });
-clsSelect.addEventListener("change", updateBrowseResults);
+document.getElementById("cls-filter-group").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  const already = chip.classList.contains("selected");
+  document.querySelectorAll("#cls-filter-group .chip").forEach(c => c.classList.remove("selected"));
+  filterCls = already ? null : chip.dataset.cls;
+  if (!already) chip.classList.add("selected");
+  updateStudentResults();
+});
 
-function updateBrowseResults() {
-  const grade = gradeSelect.value;
-  if (!grade) { resultsEl.innerHTML = ""; return; }
-  const cls = clsSelect.value;
-  const needsCls = !clsSelect.disabled;
-  if (needsCls && !cls) { resultsEl.innerHTML = ""; return; }
-  const list = studentRoster
-    .filter(s => s.grade === grade && (!needsCls || s.cls === cls))
-    .sort((a, b) => Number(a.num || 0) - Number(b.num || 0));
-  renderStudentResults(list, "해당 학년-반에 학생이 없습니다 | No students in this grade/class");
-}
+// ----- 검색창 + 학년/반 칩을 AND로 합쳐 하나의 드롭다운에 반영 -----
+searchInput.addEventListener("input", updateStudentResults);
 
-// ----- 이름 검색 -----
-const searchInput = document.getElementById("student-search");
-searchInput.addEventListener("input", () => {
+function updateStudentResults() {
   const q = searchInput.value.trim();
-  if (!q) { resultsEl.innerHTML = ""; return; }
-  const matches = studentRoster.filter(s =>
-    s.name.includes(q) || (s.engName && s.engName.toLowerCase().includes(q.toLowerCase()))
-  ).slice(0, 8);
-  renderStudentResults(matches, "검색 결과가 없습니다 | No results found");
-});
+  if (!q && !filterGrade && !filterCls) { resultsEl.innerHTML = ""; return; }
+
+  let list = studentRoster;
+  if (filterGrade) list = list.filter(s => s.grade === filterGrade);
+  if (filterCls) list = list.filter(s => s.cls === filterCls);
+  if (q) list = list.filter(s => s.name.includes(q) || (s.engName && s.engName.toLowerCase().includes(q.toLowerCase())));
+
+  list = list.sort((a, b) => Number(a.num || 0) - Number(b.num || 0));
+  if (q) list = list.slice(0, 8); // 이름 검색 중엔 자동완성처럼 짧게, 학년/반만 고른 경우엔 전체 표시
+
+  renderStudentResults(list, "검색 결과가 없습니다 | No results found");
+}
 
 document.getElementById("clear-student-btn").addEventListener("click", () => {
   selectedStudent = null;
@@ -665,14 +639,11 @@ function resetForm() {
   selectedCategory = null;
   selectedDetail = null;
   selectedPeriods = new Set();
+  filterGrade = null;
+  filterCls = null;
   document.getElementById("selected-student-box").style.display = "none";
   document.getElementById("student-picker").style.display = "block";
   document.querySelectorAll(".chip").forEach(c => c.classList.remove("selected"));
-  document.querySelector('#student-mode-group .chip[data-mode="browse"]').classList.add("selected");
-  document.getElementById("browse-mode").style.display = "flex";
-  document.getElementById("search-mode").style.display = "none";
-  gradeSelect.value = "";
-  clsSelect.innerHTML = `<option value="">반 | Class</option>`;
   searchInput.value = "";
   resultsEl.innerHTML = "";
   document.getElementById("periods-field").style.display = "none";
