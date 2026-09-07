@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>HIS 출결체크</title>
+<title>HIS 출결체크 | Attendance Check</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
@@ -68,15 +68,15 @@
 
   /* ===== 상단바 ===== */
   #topbar{
-    background:var(--primary); color:#fff; padding:14px 18px;
-    display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+    background:var(--primary); color:#fff; padding:12px 14px;
+    display:flex; align-items:center; justify-content:space-between; flex-shrink:0; gap:8px;
   }
-  #topbar .title{ font-size:17px; font-weight:700; letter-spacing:-.2px; }
-  #topbar .user{ display:flex; align-items:center; gap:10px; font-size:13px; }
-  #topbar .user-name{ font-weight:500; }
+  #topbar .title{ font-size:14px; font-weight:700; letter-spacing:-.2px; white-space:nowrap; }
+  #topbar .user{ display:flex; align-items:center; gap:8px; font-size:12px; flex-shrink:0; }
+  #topbar .user-name{ font-weight:500; max-width:88px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #logout-btn{
     background:rgba(255,255,255,.18); border:none; color:#fff; border-radius:14px;
-    padding:6px 12px; font-size:12px; cursor:pointer;
+    padding:6px 10px; font-size:11px; cursor:pointer; white-space:nowrap;
   }
 
   /* ===== 콘텐츠 ===== */
@@ -178,11 +178,11 @@
   <!-- 로그인 게이트 -->
   <div id="gate" class="gate">
     <div class="gate-badge">출</div>
-    <h1>HIS 출결체크</h1>
-    <p>학교 Google 계정(@his.sc.kr)으로<br>로그인해주세요.</p>
+    <h1>HIS 출결체크 | Attendance Check</h1>
+    <p>학교 Google 계정(@his.sc.kr)으로 로그인해주세요.<br>Please sign in with your @his.sc.kr Google account.</p>
     <button id="login-btn" class="btn-google">
       <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84c-.21 1.13-.85 2.09-1.81 2.73v2.27h2.93c1.71-1.58 2.68-3.9 2.68-6.64z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.93-2.27c-.81.54-1.85.86-3.03.86-2.33 0-4.3-1.57-5.01-3.68H.96v2.34C2.44 15.98 5.48 18 9 18z"/><path fill="#FBBC05" d="M3.99 10.71A5.4 5.4 0 013.71 9c0-.59.1-1.17.28-1.71V4.95H.96A9 9 0 000 9c0 1.45.35 2.83.96 4.05l3.03-2.34z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.59-2.59C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.95l3.03 2.34C4.7 5.15 6.67 3.58 9 3.58z"/></svg>
-      Google로 로그인
+      Google로 로그인 | Sign in with Google
     </button>
     <p id="gate-error" class="gate-error"></p>
   </div>
@@ -190,19 +190,19 @@
   <!-- 미등록 계정 -->
   <div id="denied" class="gate" style="display:none;">
     <div class="gate-badge" style="background:var(--absence);">!</div>
-    <h1>등록되지 않은 계정입니다</h1>
+    <h1>등록되지 않은 계정입니다 | Account Not Registered</h1>
     <p id="denied-email" style="font-weight:600;"></p>
-    <p>교직원 명단에서 확인되지 않았습니다.<br>관리자에게 등록을 요청해주세요.</p>
-    <button id="denied-logout-btn" class="btn-google">로그아웃</button>
+    <p>교직원 명단에서 확인되지 않았습니다.<br>관리자에게 등록을 요청해주세요.<br>Not found in staff records.<br>Please ask an admin to register you.</p>
+    <button id="denied-logout-btn" class="btn-google">로그아웃 | Log Out</button>
   </div>
 
   <!-- 앱 본체 -->
   <div id="app-wrap">
     <div id="topbar">
-      <div class="title">HIS 출결체크</div>
+      <div class="title">HIS 출결체크 | Attendance</div>
       <div class="user">
         <span class="user-name" id="user-name"></span>
-        <button id="logout-btn">로그아웃</button>
+        <button id="logout-btn">로그아웃 | Log Out</button>
       </div>
     </div>
 
@@ -212,9 +212,9 @@
       <div id="view-input" class="view active">
         <div class="card">
           <div class="field">
-            <span class="field-label">학생</span>
+            <span class="field-label">학생 | Student</span>
             <div id="student-search-wrap">
-              <input type="text" id="student-search" placeholder="이름으로 검색">
+              <input type="text" id="student-search" placeholder="이름으로 검색 | Search by name">
               <div id="student-results"></div>
             </div>
             <div class="selected-student" id="selected-student-box" style="display:none;">
@@ -222,12 +222,12 @@
                 <div class="name" id="selected-student-name"></div>
                 <div class="sub" id="selected-student-sub"></div>
               </div>
-              <button class="clear-student" id="clear-student-btn">변경</button>
+              <button class="clear-student" id="clear-student-btn">변경 | Change</button>
             </div>
           </div>
 
           <div class="field">
-            <span class="field-label">기간</span>
+            <span class="field-label">기간 | Date Range</span>
             <div class="date-row">
               <input type="date" id="start-date">
               <span>~</span>
@@ -236,27 +236,17 @@
           </div>
 
           <div class="field">
-            <span class="field-label">분류</span>
-            <div class="chip-group" id="category-group">
-              <div class="chip" data-value="결석">결석</div>
-              <div class="chip" data-value="지각">지각</div>
-              <div class="chip" data-value="조퇴">조퇴</div>
-              <div class="chip" data-value="결과">결과</div>
-            </div>
+            <span class="field-label">분류 | Category</span>
+            <div class="chip-group" id="category-group"></div>
           </div>
 
           <div class="field">
-            <span class="field-label">상세</span>
-            <div class="chip-group" id="detail-group">
-              <div class="chip" data-value="출석인정">출석 인정</div>
-              <div class="chip" data-value="질병">질병</div>
-              <div class="chip" data-value="미인정">미인정</div>
-              <div class="chip" data-value="기타">기타</div>
-            </div>
+            <span class="field-label">상세 | Detail</span>
+            <div class="chip-group" id="detail-group"></div>
           </div>
 
           <div class="field" id="periods-field" style="display:none;">
-            <span class="field-label">교시선택</span>
+            <span class="field-label">교시선택 | Class Period</span>
             <div class="chip-group" id="periods-group">
               <div class="chip period" data-value="1">1</div>
               <div class="chip period" data-value="2">2</div>
@@ -269,11 +259,11 @@
           </div>
 
           <div class="field">
-            <span class="field-label">이유</span>
-            <textarea id="reason-input" placeholder="사유를 입력하세요"></textarea>
+            <span class="field-label">이유 | Reason</span>
+            <textarea id="reason-input" placeholder="사유를 입력하세요 | Enter reason"></textarea>
           </div>
 
-          <button class="submit-btn" id="submit-btn" disabled>저장</button>
+          <button class="submit-btn" id="submit-btn" disabled>저장 | Save</button>
         </div>
       </div>
 
@@ -287,11 +277,11 @@
     <div id="bottomnav">
       <button class="nav-btn active" data-view="view-input">
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-        입력
+        입력 | Input
       </button>
       <button class="nav-btn" data-view="view-recent">
         <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-        최근 기록
+        최근 기록 | Recent
       </button>
     </div>
   </div>
@@ -333,6 +323,15 @@ const DETAIL_LABEL = { "출석인정":"출석 인정 | School Approved", "질병
 const CATEGORY_COLOR = { "결석":"var(--absence)", "지각":"var(--late)", "조퇴":"var(--early)", "결과":"var(--classabsent)" };
 const PERIOD_REQUIRED_CATEGORIES = ["지각","조퇴","결과"];
 
+function renderChipGroup(containerId, labelMap) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = Object.entries(labelMap)
+    .map(([val, label]) => `<div class="chip" data-value="${val}">${label}</div>`)
+    .join("");
+}
+renderChipGroup("category-group", CATEGORY_LABEL);
+renderChipGroup("detail-group", DETAIL_LABEL);
+
 let currentUser = null;
 let myStaff = null;      // { name, email, ... }
 let studentRoster = [];  // 현재 학년도 학생 전체 (경량 필드만)
@@ -351,7 +350,7 @@ document.getElementById("login-btn").addEventListener("click", () => {
   gateErrorEl.style.display = "none";
   signInWithPopup(auth, provider).catch(err => {
     console.error(err);
-    gateErrorEl.textContent = "로그인에 실패했습니다. 다시 시도해주세요.";
+    gateErrorEl.textContent = "로그인에 실패했습니다. 다시 시도해주세요. | Sign-in failed. Please try again.";
     gateErrorEl.style.display = "block";
   });
 });
@@ -366,7 +365,7 @@ onAuthStateChanged(auth, async (user) => {
   if (!user || !user.email || !user.email.endsWith("@" + ALLOWED_DOMAIN)) {
     if (user) {
       signOut(auth);
-      gateErrorEl.textContent = "@" + ALLOWED_DOMAIN + " 계정으로만 로그인할 수 있습니다.";
+      gateErrorEl.textContent = "@" + ALLOWED_DOMAIN + " 계정으로만 로그인할 수 있습니다. | Only @" + ALLOWED_DOMAIN + " accounts can sign in.";
       gateErrorEl.style.display = "block";
     }
     gateEl.style.display = "flex";
@@ -429,7 +428,7 @@ searchInput.addEventListener("input", () => {
     s.name.includes(q) || (s.engName && s.engName.toLowerCase().includes(q.toLowerCase()))
   ).slice(0, 8);
   if (matches.length === 0) {
-    resultsEl.innerHTML = `<div class="student-opt">검색 결과가 없습니다</div>`;
+    resultsEl.innerHTML = `<div class="student-opt">검색 결과가 없습니다 | No results found</div>`;
   } else {
     resultsEl.innerHTML = matches.map(s => `
       <div class="student-opt" data-email="${s.email}">
@@ -527,7 +526,7 @@ function dateRange(startStr, endStr) {
 document.getElementById("submit-btn").addEventListener("click", async () => {
   const btn = document.getElementById("submit-btn");
   btn.disabled = true;
-  btn.textContent = "저장 중...";
+  btn.textContent = "저장 중... | Saving...";
 
   try {
     const startDate = document.getElementById("start-date").value;
@@ -569,13 +568,13 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
     });
 
     await batch.commit();
-    showToast("저장되었습니다");
+    showToast("저장되었습니다 | Saved");
     resetForm();
   } catch (err) {
     console.error(err);
-    showToast("저장 실패: " + err.message);
+    showToast("저장 실패 | Save failed: " + err.message);
   } finally {
-    btn.textContent = "저장";
+    btn.textContent = "저장 | Save";
     updateSubmitState();
   }
 });
@@ -604,7 +603,7 @@ function showToast(msg) {
 // ===== 최근 기록 =====
 async function loadRecentRecords() {
   const listEl = document.getElementById("recent-list");
-  listEl.innerHTML = `<div class="empty-msg">불러오는 중...</div>`;
+  listEl.innerHTML = `<div class="empty-msg">불러오는 중... | Loading...</div>`;
   try {
     const q = query(
       collection(db, "attendanceReports"),
@@ -614,7 +613,7 @@ async function loadRecentRecords() {
     );
     const snap = await getDocs(q);
     if (snap.empty) {
-      listEl.innerHTML = `<div class="empty-msg">입력한 기록이 없습니다</div>`;
+      listEl.innerHTML = `<div class="empty-msg">입력한 기록이 없습니다 | No records yet</div>`;
       return;
     }
     listEl.innerHTML = "";
@@ -622,7 +621,7 @@ async function loadRecentRecords() {
       const r = d.data();
       const color = CATEGORY_COLOR[r.category] || "var(--text-2)";
       const dateStr = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
-      const periodStr = (r.periods && r.periods.length) ? ` · ${r.periods.join(",")}교시` : "";
+      const periodStr = (r.periods && r.periods.length) ? ` · ${r.periods.join(",")}교시 | P${r.periods.join(",")}` : "";
       const card = document.createElement("div");
       card.className = "record-card";
       card.style.borderLeftColor = color;
@@ -638,7 +637,7 @@ async function loadRecentRecords() {
     });
   } catch (err) {
     console.error(err);
-    listEl.innerHTML = `<div class="empty-msg">불러오기 실패: ${err.message}</div>`;
+    listEl.innerHTML = `<div class="empty-msg">불러오기 실패 | Failed to load: ${err.message}</div>`;
   }
 }
 </script>
