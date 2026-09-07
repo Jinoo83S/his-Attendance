@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>HIS 출결체크</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --primary:#1A73E8;
+    --primary-dark:#174EA6;
+    --bg:#F1F3F4;
+    --surface:#FFFFFF;
+    --border:#DADCE0;
+    --text:#202124;
+    --text-2:#5F6368;
+    --absence:#D93025;
+    --late:#E37400;
+    --early:#B5710A;
+    --classabsent:#9334E6;
+    --radius:10px;
+    --shell-max:520px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    font-family:'Noto Sans KR','Roboto',-apple-system,BlinkMacSystemFont,sans-serif;
+    background:#DDE1E4;
+    color:var(--text);
+    -webkit-font-smoothing:antialiased;
+  }
+  /* 데스크톱에서는 AppSheet 특유의 '중앙 정렬된 폰 프레임' 느낌 */
+  #shell{
+    max-width:var(--shell-max);
+    margin:0 auto;
+    min-height:100vh;
+    background:var(--bg);
+    display:flex;
+    flex-direction:column;
+    box-shadow:0 0 40px rgba(0,0,0,.15);
+    position:relative;
+  }
+  @media (min-width:560px){
+    body{ padding:24px 0; }
+    #shell{ min-height:calc(100vh - 48px); border-radius:16px; overflow:hidden; }
+  }
+
+  /* ===== 로그인 / 접근거부 게이트 ===== */
+  .gate{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:32px 28px; text-align:center; gap:18px; background:var(--surface);
+  }
+  .gate-badge{
+    width:64px;height:64px;border-radius:16px;background:var(--primary);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:900;
+  }
+  .gate h1{ font-size:20px; margin:0; font-weight:700; }
+  .gate p{ font-size:14px; color:var(--text-2); margin:0; line-height:1.6; }
+  .btn-google{
+    display:flex; align-items:center; gap:10px; padding:12px 22px; border-radius:24px;
+    border:1px solid var(--border); background:#fff; font-size:15px; font-weight:500; color:var(--text);
+    cursor:pointer; margin-top:8px;
+  }
+  .btn-google:hover{ box-shadow:0 1px 4px rgba(0,0,0,.15); }
+  .gate-error{ color:var(--absence); font-size:13px; display:none; }
+
+  /* ===== 상단바 ===== */
+  #topbar{
+    background:var(--primary); color:#fff; padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+  }
+  #topbar .title{ font-size:17px; font-weight:700; letter-spacing:-.2px; }
+  #topbar .user{ display:flex; align-items:center; gap:10px; font-size:13px; }
+  #topbar .user-name{ font-weight:500; }
+  #logout-btn{
+    background:rgba(255,255,255,.18); border:none; color:#fff; border-radius:14px;
+    padding:6px 12px; font-size:12px; cursor:pointer;
+  }
+
+  /* ===== 콘텐츠 ===== */
+  #content{ flex:1; overflow-y:auto; padding:16px 16px 90px; }
+  .view{ display:none; }
+  .view.active{ display:block; }
+
+  .card{
+    background:var(--surface); border-radius:var(--radius); padding:16px;
+    box-shadow:0 1px 2px rgba(0,0,0,.08); margin-bottom:14px;
+  }
+  .field-label{ font-size:12px; font-weight:700; color:var(--text-2); margin-bottom:8px; display:block; }
+  .field{ margin-bottom:20px; }
+  .field:last-child{ margin-bottom:0; }
+
+  input[type=text], input[type=date], textarea{
+    width:100%; border:1px solid var(--border); border-radius:8px; padding:11px 12px;
+    font-size:15px; font-family:inherit; color:var(--text); background:#fff;
+  }
+  input:focus, textarea:focus{ outline:2px solid var(--primary); outline-offset:-1px; border-color:var(--primary); }
+  textarea{ resize:vertical; min-height:64px; }
+  .date-row{ display:flex; gap:10px; align-items:center; }
+  .date-row span{ color:var(--text-2); font-size:13px; }
+
+  .chip-group{ display:flex; flex-wrap:wrap; gap:8px; }
+  .chip{
+    padding:9px 16px; border-radius:20px; border:1.5px solid var(--border); background:#fff;
+    font-size:14px; font-weight:500; color:var(--text-2); cursor:pointer; user-select:none;
+  }
+  .chip.selected{ background:var(--primary); border-color:var(--primary); color:#fff; }
+  .chip.period{ padding:8px 0; width:38px; text-align:center; border-radius:8px; }
+
+  /* 학생 검색 */
+  #student-search-wrap{ position:relative; }
+  #student-results{
+    position:absolute; left:0; right:0; top:calc(100% + 4px); background:#fff;
+    border:1px solid var(--border); border-radius:8px; max-height:220px; overflow-y:auto;
+    box-shadow:0 4px 14px rgba(0,0,0,.12); z-index:20; display:none;
+  }
+  #student-results.show{ display:block; }
+  .student-opt{ padding:10px 12px; font-size:14px; cursor:pointer; border-bottom:1px solid #F1F1F1; }
+  .student-opt:last-child{ border-bottom:none; }
+  .student-opt:hover, .student-opt.active{ background:#F1F6FE; }
+  .student-opt .sub{ font-size:12px; color:var(--text-2); }
+  .selected-student{
+    display:flex; align-items:center; justify-content:space-between; background:#F1F6FE;
+    border:1.5px solid var(--primary); border-radius:8px; padding:11px 12px;
+  }
+  .selected-student .name{ font-weight:700; font-size:15px; }
+  .selected-student .sub{ font-size:12px; color:var(--text-2); margin-top:2px; }
+  .clear-student{ background:none; border:none; color:var(--primary); font-size:13px; cursor:pointer; font-weight:600; }
+
+  .submit-btn{
+    width:100%; background:var(--primary); color:#fff; border:none; border-radius:24px;
+    padding:14px; font-size:16px; font-weight:700; cursor:pointer; margin-top:6px;
+  }
+  .submit-btn:disabled{ background:#B9C4CE; cursor:not-allowed; }
+  .submit-btn:active:not(:disabled){ background:var(--primary-dark); }
+
+  .toast{
+    position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:#323232; color:#fff; padding:12px 20px; border-radius:8px; font-size:14px;
+    opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; z-index:100; max-width:90%; text-align:center;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* 기록 카드 */
+  .record-card{
+    background:#fff; border-radius:8px; padding:12px 14px; margin-bottom:10px;
+    border-left:5px solid var(--text-2); box-shadow:0 1px 2px rgba(0,0,0,.06);
+  }
+  .record-card .top-row{ display:flex; justify-content:space-between; align-items:baseline; }
+  .record-card .student-name{ font-weight:700; font-size:15px; }
+  .record-card .type-badge{ font-size:12px; font-weight:700; }
+  .record-card .meta{ font-size:12px; color:var(--text-2); margin-top:4px; }
+  .record-card .reason{ font-size:13px; color:var(--text); margin-top:6px; }
+  .empty-msg{ text-align:center; color:var(--text-2); font-size:13px; padding:30px 10px; }
+
+  /* ===== 하단 내비 ===== */
+  #bottomnav{
+    display:flex; background:#fff; border-top:1px solid var(--border);
+    position:absolute; left:0; right:0; bottom:0; flex-shrink:0;
+  }
+  .nav-btn{
+    flex:1; border:none; background:none; padding:9px 4px 10px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--text-2); font-size:11px; font-weight:500;
+  }
+  .nav-btn.active{ color:var(--primary); }
+  .nav-btn svg{ width:22px; height:22px; }
+
+  #app-wrap{ display:none; flex:1; flex-direction:column; min-height:0; }
+  #app-wrap.active{ display:flex; }
+</style>
+</head>
+<body>
+
+<div id="shell">
+
+  <!-- 로그인 게이트 -->
+  <div id="gate" class="gate">
+    <div class="gate-badge">출</div>
+    <h1>HIS 출결체크</h1>
+    <p>학교 Google 계정(@his.sc.kr)으로<br>로그인해주세요.</p>
+    <button id="login-btn" class="btn-google">
+      <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84c-.21 1.13-.85 2.09-1.81 2.73v2.27h2.93c1.71-1.58 2.68-3.9 2.68-6.64z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.93-2.27c-.81.54-1.85.86-3.03.86-2.33 0-4.3-1.57-5.01-3.68H.96v2.34C2.44 15.98 5.48 18 9 18z"/><path fill="#FBBC05" d="M3.99 10.71A5.4 5.4 0 013.71 9c0-.59.1-1.17.28-1.71V4.95H.96A9 9 0 000 9c0 1.45.35 2.83.96 4.05l3.03-2.34z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.59-2.59C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.95l3.03 2.34C4.7 5.15 6.67 3.58 9 3.58z"/></svg>
+      Google로 로그인
+    </button>
+    <p id="gate-error" class="gate-error"></p>
+  </div>
+
+  <!-- 미등록 계정 -->
+  <div id="denied" class="gate" style="display:none;">
+    <div class="gate-badge" style="background:var(--absence);">!</div>
+    <h1>등록되지 않은 계정입니다</h1>
+    <p id="denied-email" style="font-weight:600;"></p>
+    <p>교직원 명단에서 확인되지 않았습니다.<br>관리자에게 등록을 요청해주세요.</p>
+    <button id="denied-logout-btn" class="btn-google">로그아웃</button>
+  </div>
+
+  <!-- 앱 본체 -->
+  <div id="app-wrap">
+    <div id="topbar">
+      <div class="title">HIS 출결체크</div>
+      <div class="user">
+        <span class="user-name" id="user-name"></span>
+        <button id="logout-btn">로그아웃</button>
+      </div>
+    </div>
+
+    <div id="content">
+
+      <!-- 입력 화면 -->
+      <div id="view-input" class="view active">
+        <div class="card">
+          <div class="field">
+            <span class="field-label">학생</span>
+            <div id="student-search-wrap">
+              <input type="text" id="student-search" placeholder="이름으로 검색">
+              <div id="student-results"></div>
+            </div>
+            <div class="selected-student" id="selected-student-box" style="display:none;">
+              <div>
+                <div class="name" id="selected-student-name"></div>
+                <div class="sub" id="selected-student-sub"></div>
+              </div>
+              <button class="clear-student" id="clear-student-btn">변경</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="field-label">기간</span>
+            <div class="date-row">
+              <input type="date" id="start-date">
+              <span>~</span>
+              <input type="date" id="end-date">
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="field-label">분류</span>
+            <div class="chip-group" id="category-group">
+              <div class="chip" data-value="결석">결석</div>
+              <div class="chip" data-value="지각">지각</div>
+              <div class="chip" data-value="조퇴">조퇴</div>
+              <div class="chip" data-value="결과">결과</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="field-label">상세</span>
+            <div class="chip-group" id="detail-group">
+              <div class="chip" data-value="출석인정">출석 인정</div>
+              <div class="chip" data-value="질병">질병</div>
+              <div class="chip" data-value="미인정">미인정</div>
+              <div class="chip" data-value="기타">기타</div>
+            </div>
+          </div>
+
+          <div class="field" id="periods-field" style="display:none;">
+            <span class="field-label">교시선택</span>
+            <div class="chip-group" id="periods-group">
+              <div class="chip period" data-value="1">1</div>
+              <div class="chip period" data-value="2">2</div>
+              <div class="chip period" data-value="3">3</div>
+              <div class="chip period" data-value="4">4</div>
+              <div class="chip period" data-value="5">5</div>
+              <div class="chip period" data-value="6">6</div>
+              <div class="chip period" data-value="7">7</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="field-label">이유</span>
+            <textarea id="reason-input" placeholder="사유를 입력하세요"></textarea>
+          </div>
+
+          <button class="submit-btn" id="submit-btn" disabled>저장</button>
+        </div>
+      </div>
+
+      <!-- 최근 기록 화면 -->
+      <div id="view-recent" class="view">
+        <div id="recent-list"></div>
+      </div>
+
+    </div>
+
+    <div id="bottomnav">
+      <button class="nav-btn active" data-view="view-input">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        입력
+      </button>
+      <button class="nav-btn" data-view="view-recent">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        최근 기록
+      </button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import {
+  getFirestore, doc, getDoc, collection, query, where, orderBy, limit,
+  getDocs, writeBatch, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+// TODO: apiKey 등은 공개 저장소(GitHub 등)에 올릴 경우 Firebase 콘솔에서
+// "API 키 제한(HTTP 리퍼러)"을 설정해 도용을 방지하세요.
+const firebaseConfig = {
+  apiKey: "AIzaSyBeSyJY2pET002knu7KWKuqV-Nkhy7OEHQ",
+  authDomain: "his-main.firebaseapp.com",
+  projectId: "his-main",
+  storageBucket: "his-main.firebasestorage.app",
+  messagingSenderId: "311279275648",
+  appId: "1:311279275648:web:3609db730ec2b0e77ea065"
+};
+const ALLOWED_DOMAIN = "his.sc.kr";
+const CURRENT_YEAR = "2026"; // TODO: 학년도 전환 시 수동 갱신 (또는 이후 설정화면으로 이동)
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const provider = new GoogleAuthProvider();
+provider.setCustomParameters({ hd: ALLOWED_DOMAIN });
+
+const CATEGORY_LABEL = { "결석":"결석 | Absences", "지각":"지각 | Late", "조퇴":"조퇴 | Early leaving", "결과":"결과 | Absent from class" };
+const DETAIL_LABEL = { "출석인정":"출석 인정 | School Approved", "질병":"질병 | Sick", "미인정":"미인정 | Unexcused", "기타":"기타 | Other" };
+const CATEGORY_COLOR = { "결석":"var(--absence)", "지각":"var(--late)", "조퇴":"var(--early)", "결과":"var(--classabsent)" };
+const PERIOD_REQUIRED_CATEGORIES = ["지각","조퇴","결과"];
+
+let currentUser = null;
+let myStaff = null;      // { name, email, ... }
+let studentRoster = [];  // 현재 학년도 학생 전체 (경량 필드만)
+let selectedStudent = null;
+let selectedCategory = null;
+let selectedDetail = null;
+let selectedPeriods = new Set();
+
+// ===== 엘리먼트 =====
+const gateEl = document.getElementById("gate");
+const deniedEl = document.getElementById("denied");
+const appWrapEl = document.getElementById("app-wrap");
+const gateErrorEl = document.getElementById("gate-error");
+
+document.getElementById("login-btn").addEventListener("click", () => {
+  gateErrorEl.style.display = "none";
+  signInWithPopup(auth, provider).catch(err => {
+    console.error(err);
+    gateErrorEl.textContent = "로그인에 실패했습니다. 다시 시도해주세요.";
+    gateErrorEl.style.display = "block";
+  });
+});
+document.getElementById("logout-btn").addEventListener("click", () => signOut(auth));
+document.getElementById("denied-logout-btn").addEventListener("click", () => signOut(auth));
+
+onAuthStateChanged(auth, async (user) => {
+  gateEl.style.display = "none";
+  deniedEl.style.display = "none";
+  appWrapEl.classList.remove("active");
+
+  if (!user || !user.email || !user.email.endsWith("@" + ALLOWED_DOMAIN)) {
+    if (user) {
+      signOut(auth);
+      gateErrorEl.textContent = "@" + ALLOWED_DOMAIN + " 계정으로만 로그인할 수 있습니다.";
+      gateErrorEl.style.display = "block";
+    }
+    gateEl.style.display = "flex";
+    return;
+  }
+
+  const staffSnap = await getDoc(doc(db, "staff", user.email));
+  if (!staffSnap.exists()) {
+    document.getElementById("denied-email").textContent = user.email;
+    deniedEl.style.display = "flex";
+    return;
+  }
+
+  currentUser = user;
+  const sd = staffSnap.data();
+  myStaff = {
+    email: user.email,
+    name: sd.displayName || sd.nameKo || sd.nameEn || user.email.split("@")[0]
+  };
+  document.getElementById("user-name").textContent = myStaff.name;
+
+  appWrapEl.classList.add("active");
+  initTodayDates();
+  await loadStudentRoster();
+  loadRecentRecords();
+});
+
+// ===== 하단 내비 =====
+document.querySelectorAll(".nav-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+    document.getElementById(btn.dataset.view).classList.add("active");
+    if (btn.dataset.view === "view-recent") loadRecentRecords();
+  });
+});
+
+// ===== 학생 로스터 로드 + 검색 =====
+async function loadStudentRoster() {
+  studentRoster = [];
+  const q = query(collection(db, "studentRecords"), where("year", "==", CURRENT_YEAR));
+  const snap = await getDocs(q);
+  snap.forEach(d => {
+    const s = d.data();
+    if (!s.name) return;
+    studentRoster.push({
+      email: s.email, name: s.name, engName: s.engName || "",
+      grade: s.grade || "", cls: s.cls || "", schoolLevel: s.schoolLevel || ""
+    });
+  });
+}
+
+const searchInput = document.getElementById("student-search");
+const resultsEl = document.getElementById("student-results");
+searchInput.addEventListener("input", () => {
+  const q = searchInput.value.trim();
+  if (!q) { resultsEl.classList.remove("show"); resultsEl.innerHTML = ""; return; }
+  const matches = studentRoster.filter(s =>
+    s.name.includes(q) || (s.engName && s.engName.toLowerCase().includes(q.toLowerCase()))
+  ).slice(0, 8);
+  if (matches.length === 0) {
+    resultsEl.innerHTML = `<div class="student-opt">검색 결과가 없습니다</div>`;
+  } else {
+    resultsEl.innerHTML = matches.map(s => `
+      <div class="student-opt" data-email="${s.email}">
+        ${s.name}${s.engName ? " · " + s.engName : ""}
+        <div class="sub">${s.grade}${s.cls || ""}</div>
+      </div>`).join("");
+  }
+  resultsEl.classList.add("show");
+});
+resultsEl.addEventListener("click", (e) => {
+  const opt = e.target.closest(".student-opt[data-email]");
+  if (!opt) return;
+  const s = studentRoster.find(x => x.email === opt.dataset.email);
+  if (!s) return;
+  selectedStudent = s;
+  document.getElementById("selected-student-name").textContent = s.name + (s.engName ? " · " + s.engName : "");
+  document.getElementById("selected-student-sub").textContent = `${s.grade}${s.cls || ""}`;
+  document.getElementById("selected-student-box").style.display = "flex";
+  document.getElementById("student-search-wrap").style.display = "none";
+  searchInput.value = "";
+  resultsEl.classList.remove("show");
+  updateSubmitState();
+});
+document.getElementById("clear-student-btn").addEventListener("click", () => {
+  selectedStudent = null;
+  document.getElementById("selected-student-box").style.display = "none";
+  document.getElementById("student-search-wrap").style.display = "block";
+  updateSubmitState();
+});
+
+// ===== 날짜 =====
+function initTodayDates() {
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById("start-date").value = today;
+  document.getElementById("end-date").value = today;
+}
+document.getElementById("start-date").addEventListener("change", updateSubmitState);
+document.getElementById("end-date").addEventListener("change", updateSubmitState);
+
+// ===== 분류 / 상세 칩 =====
+document.getElementById("category-group").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  document.querySelectorAll("#category-group .chip").forEach(c => c.classList.remove("selected"));
+  chip.classList.add("selected");
+  selectedCategory = chip.dataset.value;
+  const needsPeriods = PERIOD_REQUIRED_CATEGORIES.includes(selectedCategory);
+  document.getElementById("periods-field").style.display = needsPeriods ? "block" : "none";
+  if (!needsPeriods) { selectedPeriods.clear(); document.querySelectorAll("#periods-group .chip").forEach(c => c.classList.remove("selected")); }
+  updateSubmitState();
+});
+document.getElementById("detail-group").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  document.querySelectorAll("#detail-group .chip").forEach(c => c.classList.remove("selected"));
+  chip.classList.add("selected");
+  selectedDetail = chip.dataset.value;
+  updateSubmitState();
+});
+document.getElementById("periods-group").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  const v = chip.dataset.value;
+  if (selectedPeriods.has(v)) { selectedPeriods.delete(v); chip.classList.remove("selected"); }
+  else { selectedPeriods.add(v); chip.classList.add("selected"); }
+  updateSubmitState();
+});
+
+const reasonInput = document.getElementById("reason-input");
+reasonInput.addEventListener("input", updateSubmitState);
+
+function updateSubmitState() {
+  const start = document.getElementById("start-date").value;
+  const end = document.getElementById("end-date").value;
+  const needsPeriods = PERIOD_REQUIRED_CATEGORIES.includes(selectedCategory);
+  const ok = selectedStudent && start && end && start <= end
+    && selectedCategory && selectedDetail
+    && (!needsPeriods || selectedPeriods.size > 0)
+    && reasonInput.value.trim().length > 0;
+  document.getElementById("submit-btn").disabled = !ok;
+}
+
+// ===== 제출 =====
+function dateRange(startStr, endStr) {
+  const dates = [];
+  let cur = new Date(startStr + "T00:00:00");
+  const end = new Date(endStr + "T00:00:00");
+  while (cur <= end) {
+    dates.push(cur.toISOString().slice(0, 10));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+document.getElementById("submit-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("submit-btn");
+  btn.disabled = true;
+  btn.textContent = "저장 중...";
+
+  try {
+    const startDate = document.getElementById("start-date").value;
+    const endDate = document.getElementById("end-date").value;
+    const attendanceType = selectedDetail + selectedCategory;
+    const periodsArr = PERIOD_REQUIRED_CATEGORIES.includes(selectedCategory) ? Array.from(selectedPeriods).sort() : [];
+
+    const reportRef = doc(collection(db, "attendanceReports"));
+    const batch = writeBatch(db);
+    const reportData = {
+      studentEmail: selectedStudent.email,
+      studentName: selectedStudent.name,
+      grade: selectedStudent.grade,
+      cls: selectedStudent.cls,
+      startDate, endDate,
+      category: selectedCategory,
+      detail: selectedDetail,
+      reason: reasonInput.value.trim(),
+      periods: periodsArr,
+      attendanceType,
+      createdBy: myStaff.email,
+      createdByName: myStaff.name,
+      createdAt: serverTimestamp(),
+      synced: false,
+      syncedAt: null
+    };
+    batch.set(reportRef, reportData);
+
+    dateRange(startDate, endDate).forEach(dateStr => {
+      const dailyRef = doc(db, "attendanceDaily", `${reportRef.id}_${dateStr}`);
+      batch.set(dailyRef, {
+        reportId: reportRef.id, date: dateStr,
+        studentEmail: selectedStudent.email, studentName: selectedStudent.name,
+        grade: selectedStudent.grade, cls: selectedStudent.cls,
+        category: selectedCategory, detail: selectedDetail, reason: reasonInput.value.trim(),
+        periods: periodsArr, attendanceType,
+        createdBy: myStaff.email, createdByName: myStaff.name
+      });
+    });
+
+    await batch.commit();
+    showToast("저장되었습니다");
+    resetForm();
+  } catch (err) {
+    console.error(err);
+    showToast("저장 실패: " + err.message);
+  } finally {
+    btn.textContent = "저장";
+    updateSubmitState();
+  }
+});
+
+function resetForm() {
+  selectedStudent = null;
+  selectedCategory = null;
+  selectedDetail = null;
+  selectedPeriods = new Set();
+  document.getElementById("selected-student-box").style.display = "none";
+  document.getElementById("student-search-wrap").style.display = "block";
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("selected"));
+  document.getElementById("periods-field").style.display = "none";
+  reasonInput.value = "";
+  initTodayDates();
+  updateSubmitState();
+}
+
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+// ===== 최근 기록 =====
+async function loadRecentRecords() {
+  const listEl = document.getElementById("recent-list");
+  listEl.innerHTML = `<div class="empty-msg">불러오는 중...</div>`;
+  try {
+    const q = query(
+      collection(db, "attendanceReports"),
+      where("createdBy", "==", myStaff.email),
+      orderBy("createdAt", "desc"),
+      limit(20)
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      listEl.innerHTML = `<div class="empty-msg">입력한 기록이 없습니다</div>`;
+      return;
+    }
+    listEl.innerHTML = "";
+    snap.forEach(d => {
+      const r = d.data();
+      const color = CATEGORY_COLOR[r.category] || "var(--text-2)";
+      const dateStr = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
+      const periodStr = (r.periods && r.periods.length) ? ` · ${r.periods.join(",")}교시` : "";
+      const card = document.createElement("div");
+      card.className = "record-card";
+      card.style.borderLeftColor = color;
+      card.innerHTML = `
+        <div class="top-row">
+          <span class="student-name">${r.studentName} <span style="font-weight:400;color:var(--text-2);font-size:12px;">${r.grade}${r.cls||""}</span></span>
+          <span class="type-badge" style="color:${color};">${r.attendanceType}</span>
+        </div>
+        <div class="meta">${dateStr}${periodStr}</div>
+        <div class="reason">${r.reason || ""}</div>
+      `;
+      listEl.appendChild(card);
+    });
+  } catch (err) {
+    console.error(err);
+    listEl.innerHTML = `<div class="empty-msg">불러오기 실패: ${err.message}</div>`;
+  }
+}
+</script>
+</body>
+</html>

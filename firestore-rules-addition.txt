@@ -1,0 +1,53 @@
+기존 his-main firestore.rules 파일의 `service cloud.firestore { match /databases/{database}/documents { ... } }`
+블록 안, 다른 match 문들과 같은 레벨에 아래 두 블록을 추가하세요.
+
+기존에 정의된 함수(isSignedIn, isHisAccount 등)와 이름 충돌을 피하기 위해
+헬퍼 함수 없이 조건을 인라인으로 작성했습니다.
+
+------------------------------------------------------------
+    // ===== 출결체크 앱 =====
+    match /attendanceReports/{reportId} {
+      allow read: if request.auth != null
+                  && request.auth.token.email.matches('.*@his[.]sc[.]kr')
+                  && exists(/databases/$(database)/documents/staff/$(request.auth.token.email));
+
+      allow create: if request.auth != null
+                    && request.auth.token.email.matches('.*@his[.]sc[.]kr')
+                    && exists(/databases/$(database)/documents/staff/$(request.auth.token.email))
+                    && request.resource.data.createdBy == request.auth.token.email;
+
+      allow update, delete: if request.auth != null
+                    && request.auth.token.email.matches('.*@his[.]sc[.]kr')
+                    && (
+                      resource.data.createdBy == request.auth.token.email
+                      || get(/databases/$(database)/documents/staff/$(request.auth.token.email)).data.role == 'admin'
+                    );
+    }
+
+    match /attendanceDaily/{dailyId} {
+      allow read: if request.auth != null
+                  && request.auth.token.email.matches('.*@his[.]sc[.]kr')
+                  && exists(/databases/$(database)/documents/staff/$(request.auth.token.email));
+
+      allow create: if request.auth != null
+                    && request.auth.token.email.matches('.*@his[.]sc[.]kr')
+                    && exists(/databases/$(database)/documents/staff/$(request.auth.token.email))
+                    && request.resource.data.createdBy == request.auth.token.email;
+
+      allow update, delete: if request.auth != null
+                    && request.auth.token.email.matches('.*@his[.]sc[.]kr')
+                    && (
+                      resource.data.createdBy == request.auth.token.email
+                      || get(/databases/$(database)/documents/staff/$(request.auth.token.email)).data.role == 'admin'
+                    );
+    }
+------------------------------------------------------------
+
+주의:
+- studentRecords, staff 컬렉션의 read 권한은 기존 규칙에서 이미 전체 교직원에게
+  열려 있다는 전제입니다 (일반정보 tier). 이 앱은 그 기존 규칙에 얹혀 갑니다 —
+  별도로 추가하지 않았습니다. 만약 studentRecords 조회가 막혀 있다면 학생 검색이
+  비어서 뜰 것이니, 그 경우에만 별도로 알려주세요.
+
+적용:
+  firebase deploy --only firestore:rules
