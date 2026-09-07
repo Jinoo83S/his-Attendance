@@ -109,15 +109,18 @@
   .chip.selected{ background:var(--primary); border-color:var(--primary); color:#fff; }
   .chip.period{ padding:8px 0; width:38px; text-align:center; border-radius:8px; }
 
-  /* 학생 검색 */
-  #student-search-wrap{ position:relative; }
-  #student-results{
-    position:absolute; left:0; right:0; top:calc(100% + 4px); background:#fff;
-    border:1px solid var(--border); border-radius:8px; max-height:220px; overflow-y:auto;
-    box-shadow:0 4px 14px rgba(0,0,0,.12); z-index:20; display:none;
+  /* 학생 선택 */
+  .mode-toggle{ margin-bottom:10px; }
+  .browse-row{ display:flex; gap:8px; margin-bottom:10px; }
+  .browse-row select{
+    flex:1; border:1px solid var(--border); border-radius:8px; padding:11px 10px;
+    font-size:14px; font-family:inherit; color:var(--text); background:#fff;
   }
-  #student-results.show{ display:block; }
-  .student-opt{ padding:10px 12px; font-size:14px; cursor:pointer; border-bottom:1px solid #F1F1F1; }
+  #student-results{
+    background:#fff; border:1px solid var(--border); border-radius:8px;
+    max-height:260px; overflow-y:auto; margin-top:2px;
+  }
+  .student-opt{ padding:10px 12px; font-size:14px; cursor:pointer; border-bottom:1px solid #F1F1F1; display:flex; justify-content:space-between; align-items:center; }
   .student-opt:last-child{ border-bottom:none; }
   .student-opt:hover, .student-opt.active{ background:#F1F6FE; }
   .student-opt .sub{ font-size:12px; color:var(--text-2); }
@@ -213,10 +216,25 @@
         <div class="card">
           <div class="field">
             <span class="field-label">학생 | Student</span>
-            <div id="student-search-wrap">
-              <input type="text" id="student-search" placeholder="이름으로 검색 | Search by name">
+
+            <div id="student-picker">
+              <div class="chip-group mode-toggle" id="student-mode-group">
+                <div class="chip selected" data-mode="browse">학년-반 | Grade-Class</div>
+                <div class="chip" data-mode="search">검색 | Search</div>
+              </div>
+
+              <div id="browse-mode" class="browse-row">
+                <select id="grade-select"><option value="">학년 | Grade</option></select>
+                <select id="cls-select"><option value="">반 | Class</option></select>
+              </div>
+
+              <div id="search-mode" style="display:none;">
+                <input type="text" id="student-search" placeholder="이름으로 검색 | Search by name">
+              </div>
+
               <div id="student-results"></div>
             </div>
+
             <div class="selected-student" id="selected-student-box" style="display:none;">
               <div>
                 <div class="name" id="selected-student-name"></div>
@@ -310,7 +328,7 @@ const firebaseConfig = {
   appId: "1:311279275648:web:3609db730ec2b0e77ea065"
 };
 const ALLOWED_DOMAIN = "his.sc.kr";
-const CURRENT_YEAR = "2026"; // TODO: 학년도 전환 시 수동 갱신 (또는 이후 설정화면으로 이동)
+let CURRENT_YEAR = null; // settings/general.currentYear 에서 로드 (his-main 전체와 동일 기준)
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -389,6 +407,13 @@ onAuthStateChanged(auth, async (user) => {
 
   appWrapEl.classList.add("active");
   initTodayDates();
+
+  const settingsSnap = await getDoc(doc(db, "settings", "general"));
+  CURRENT_YEAR = settingsSnap.exists() ? (settingsSnap.data().currentYear || "") : "";
+  if (!CURRENT_YEAR) {
+    showToast("현재 학년도가 설정되지 않았습니다 | Current year is not set (admin.html)");
+  }
+
   await loadStudentRoster();
   loadRecentRecords();
 });
@@ -414,30 +439,25 @@ async function loadStudentRoster() {
     if (!s.name) return;
     studentRoster.push({
       email: s.email, name: s.name, engName: s.engName || "",
-      grade: s.grade || "", cls: s.cls || "", schoolLevel: s.schoolLevel || ""
+      grade: s.grade || "", cls: s.cls || "", num: s.num || "", schoolLevel: s.schoolLevel || ""
     });
   });
+  populateGradeOptions();
 }
 
-const searchInput = document.getElementById("student-search");
 const resultsEl = document.getElementById("student-results");
-searchInput.addEventListener("input", () => {
-  const q = searchInput.value.trim();
-  if (!q) { resultsEl.classList.remove("show"); resultsEl.innerHTML = ""; return; }
-  const matches = studentRoster.filter(s =>
-    s.name.includes(q) || (s.engName && s.engName.toLowerCase().includes(q.toLowerCase()))
-  ).slice(0, 8);
-  if (matches.length === 0) {
-    resultsEl.innerHTML = `<div class="student-opt">검색 결과가 없습니다 | No results found</div>`;
-  } else {
-    resultsEl.innerHTML = matches.map(s => `
-      <div class="student-opt" data-email="${s.email}">
-        ${s.name}${s.engName ? " · " + s.engName : ""}
-        <div class="sub">${s.grade}${s.cls || ""}</div>
-      </div>`).join("");
+
+function renderStudentResults(list, emptyMsg) {
+  if (list.length === 0) {
+    resultsEl.innerHTML = `<div class="student-opt">${emptyMsg}</div>`;
+    return;
   }
-  resultsEl.classList.add("show");
-});
+  resultsEl.innerHTML = list.map(s => `
+    <div class="student-opt" data-email="${s.email}">
+      <span>${s.num ? s.num + "번 " : ""}${s.name}${s.engName ? " · " + s.engName : ""}</span>
+      <span class="sub">${s.grade}${s.cls || ""}</span>
+    </div>`).join("");
+}
 resultsEl.addEventListener("click", (e) => {
   const opt = e.target.closest(".student-opt[data-email]");
   if (!opt) return;
@@ -447,15 +467,76 @@ resultsEl.addEventListener("click", (e) => {
   document.getElementById("selected-student-name").textContent = s.name + (s.engName ? " · " + s.engName : "");
   document.getElementById("selected-student-sub").textContent = `${s.grade}${s.cls || ""}`;
   document.getElementById("selected-student-box").style.display = "flex";
-  document.getElementById("student-search-wrap").style.display = "none";
-  searchInput.value = "";
-  resultsEl.classList.remove("show");
+  document.getElementById("student-picker").style.display = "none";
+  resultsEl.innerHTML = "";
   updateSubmitState();
 });
+
+// ----- 모드 전환 (학년-반 / 검색) -----
+document.getElementById("student-mode-group").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  document.querySelectorAll("#student-mode-group .chip").forEach(c => c.classList.remove("selected"));
+  chip.classList.add("selected");
+  const mode = chip.dataset.mode;
+  document.getElementById("browse-mode").style.display = mode === "browse" ? "flex" : "none";
+  document.getElementById("search-mode").style.display = mode === "search" ? "block" : "none";
+  resultsEl.innerHTML = "";
+  if (mode === "search") document.getElementById("student-search").focus();
+});
+
+// ----- 학년-반 브라우징 -----
+const gradeSelect = document.getElementById("grade-select");
+const clsSelect = document.getElementById("cls-select");
+
+function populateGradeOptions() {
+  const grades = [...new Set(studentRoster.map(s => s.grade).filter(g => g !== ""))]
+    .sort((a, b) => Number(a) - Number(b));
+  gradeSelect.innerHTML = `<option value="">학년 | Grade</option>` +
+    grades.map(g => `<option value="${g}">${g}학년 | Grade ${g}</option>`).join("");
+}
+gradeSelect.addEventListener("change", () => {
+  const grade = gradeSelect.value;
+  const clsValues = [...new Set(studentRoster.filter(s => s.grade === grade).map(s => s.cls).filter(c => c !== ""))].sort();
+  if (clsValues.length === 0) {
+    clsSelect.innerHTML = `<option value="">-</option>`;
+    clsSelect.disabled = true;
+  } else {
+    clsSelect.disabled = false;
+    clsSelect.innerHTML = `<option value="">반 | Class</option>` +
+      clsValues.map(c => `<option value="${c}">${c}반 | Class ${c}</option>`).join("");
+  }
+  updateBrowseResults();
+});
+clsSelect.addEventListener("change", updateBrowseResults);
+
+function updateBrowseResults() {
+  const grade = gradeSelect.value;
+  if (!grade) { resultsEl.innerHTML = ""; return; }
+  const cls = clsSelect.value;
+  const needsCls = !clsSelect.disabled;
+  if (needsCls && !cls) { resultsEl.innerHTML = ""; return; }
+  const list = studentRoster
+    .filter(s => s.grade === grade && (!needsCls || s.cls === cls))
+    .sort((a, b) => Number(a.num || 0) - Number(b.num || 0));
+  renderStudentResults(list, "해당 학년-반에 학생이 없습니다 | No students in this grade/class");
+}
+
+// ----- 이름 검색 -----
+const searchInput = document.getElementById("student-search");
+searchInput.addEventListener("input", () => {
+  const q = searchInput.value.trim();
+  if (!q) { resultsEl.innerHTML = ""; return; }
+  const matches = studentRoster.filter(s =>
+    s.name.includes(q) || (s.engName && s.engName.toLowerCase().includes(q.toLowerCase()))
+  ).slice(0, 8);
+  renderStudentResults(matches, "검색 결과가 없습니다 | No results found");
+});
+
 document.getElementById("clear-student-btn").addEventListener("click", () => {
   selectedStudent = null;
   document.getElementById("selected-student-box").style.display = "none";
-  document.getElementById("student-search-wrap").style.display = "block";
+  document.getElementById("student-picker").style.display = "block";
   updateSubmitState();
 });
 
@@ -585,8 +666,15 @@ function resetForm() {
   selectedDetail = null;
   selectedPeriods = new Set();
   document.getElementById("selected-student-box").style.display = "none";
-  document.getElementById("student-search-wrap").style.display = "block";
+  document.getElementById("student-picker").style.display = "block";
   document.querySelectorAll(".chip").forEach(c => c.classList.remove("selected"));
+  document.querySelector('#student-mode-group .chip[data-mode="browse"]').classList.add("selected");
+  document.getElementById("browse-mode").style.display = "flex";
+  document.getElementById("search-mode").style.display = "none";
+  gradeSelect.value = "";
+  clsSelect.innerHTML = `<option value="">반 | Class</option>`;
+  searchInput.value = "";
+  resultsEl.innerHTML = "";
   document.getElementById("periods-field").style.display = "none";
   reasonInput.value = "";
   initTodayDates();
