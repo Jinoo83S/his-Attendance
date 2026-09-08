@@ -1365,11 +1365,21 @@ document.getElementById("cal-next-btn").addEventListener("click", () => {
   renderCalendarMode();
 });
 
+let recentFilterDefaultSet = false;
+
 async function loadRecentRecords() {
   const listEl = document.getElementById("recent-list");
   listEl.innerHTML = `<div class="empty-msg">불러오는 중... | Loading...</div>`;
   try {
     await fetchRecentData();
+    if (!recentFilterDefaultSet) {
+      const today = new Date();
+      const start = new Date();
+      start.setDate(today.getDate() - 3);
+      document.getElementById("recent-filter-start").value = start.toISOString().slice(0, 10);
+      document.getElementById("recent-filter-end").value = today.toISOString().slice(0, 10);
+      recentFilterDefaultSet = true;
+    }
     const activeMode = document.querySelector("#recent-mode-group .chip.selected")?.dataset.mode || "list";
     renderListMode();
     if (activeMode === "month") renderMonthMode();
