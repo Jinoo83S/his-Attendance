@@ -164,6 +164,23 @@
   .record-card .reason{ font-size:13px; color:var(--text); }
   .empty-msg{ text-align:center; color:var(--text-2); font-size:13px; padding:30px 10px; }
 
+  /* 달력 뷰 */
+  .cal-weekdays{ display:grid; grid-template-columns:repeat(7,1fr); text-align:center; font-size:11px; color:var(--text-2); margin-bottom:4px; }
+  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .cal-cell{
+    aspect-ratio:1; border-radius:8px; background:#fff; border:1px solid var(--border);
+    display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+    padding:4px 2px; font-size:12px; cursor:pointer; overflow:hidden;
+  }
+  .cal-cell.empty-cell{ background:transparent; border:none; cursor:default; }
+  .cal-cell.has-records{ border-color:var(--primary); border-width:1.5px; }
+  .cal-cell.selected{ background:var(--primary); color:#fff; }
+  .cal-cell .cal-daynum{ font-weight:600; }
+  .cal-dot-row{ display:flex; gap:2px; margin-top:3px; flex-wrap:wrap; justify-content:center; }
+  .cal-dot{ width:5px; height:5px; border-radius:50%; flex-shrink:0; }
+  .cal-more{ font-size:9px; color:var(--text-2); margin-top:1px; }
+  .cal-cell.selected .cal-more{ color:#fff; }
+
   /* ===== 하단 내비 ===== */
   #bottomnav{
     display:flex; background:#fff; border-top:1px solid var(--border);
@@ -283,7 +300,43 @@
 
       <!-- 최근 기록 화면 -->
       <div id="view-recent" class="view">
-        <div id="recent-list"></div>
+        <div class="chip-group" id="recent-mode-group" style="margin-bottom:12px;">
+          <div class="chip selected" data-mode="list">목록 | List</div>
+          <div class="chip" data-mode="month">월별 | Monthly</div>
+          <div class="chip" data-mode="calendar">달력 | Calendar</div>
+        </div>
+
+        <div id="recent-mode-list">
+          <div class="date-row" style="margin-bottom:10px;flex-wrap:wrap;">
+            <input type="date" id="recent-filter-start" style="min-width:0;flex:1;">
+            <span>~</span>
+            <input type="date" id="recent-filter-end" style="min-width:0;flex:1;">
+            <button class="clear-student" id="recent-filter-clear-btn">전체 | All</button>
+          </div>
+          <div id="recent-list"></div>
+        </div>
+
+        <div id="recent-mode-month" style="display:none;">
+          <div class="date-row" style="margin-bottom:10px;justify-content:space-between;">
+            <button class="clear-student" id="month-prev-btn">‹ 이전 | Prev</button>
+            <span id="month-label" style="font-weight:700;"></span>
+            <button class="clear-student" id="month-next-btn">다음 | Next ›</button>
+          </div>
+          <div id="month-list"></div>
+        </div>
+
+        <div id="recent-mode-calendar" style="display:none;">
+          <div class="date-row" style="margin-bottom:10px;justify-content:space-between;">
+            <button class="clear-student" id="cal-prev-btn">‹ 이전 | Prev</button>
+            <span id="cal-label" style="font-weight:700;"></span>
+            <button class="clear-student" id="cal-next-btn">다음 | Next ›</button>
+          </div>
+          <div class="cal-weekdays">
+            <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+          </div>
+          <div id="calendar-grid" class="cal-grid"></div>
+          <div id="calendar-day-list" style="margin-top:14px;"></div>
+        </div>
       </div>
 
       <!-- 관리자 화면 -->
@@ -321,11 +374,11 @@
             <p style="font-size:12px;color:var(--text-2);margin-bottom:10px;line-height:1.5;">
               구글시트에 직접 데이터를 입력/수정한 뒤 "불러오기"를 누르면, 앱의 과거 기록이 시트 내용으로 통째로 교체됩니다.<br>
               Edit data directly in the sheet, then "Load" replaces the app's imported records entirely with the sheet's current content.<br><br>
-              "저장하기"는 반대로 앱에 있는 모든 출결 기록을 시트에 통째로 씁니다 (기존 시트 내용 삭제 후 재작성).<br>
-              "Save" writes all attendance records from the app into the sheet (clears sheet data rows first, then rewrites).
+              "동기화"는 반대로 앱에서 아직 시트로 안 나간 새 기록만 시트 맨 뒤에 추가합니다 (기존 시트 내용은 안 건드림).<br>
+              "Sync" appends only records not yet sent to the sheet, at the end (existing sheet rows are untouched).
             </p>
             <button class="submit-btn" id="load-from-sheet-btn" type="button">구글시트에서 불러오기 | Load from Sheet</button>
-            <button class="submit-btn" id="save-to-sheet-btn" type="button" style="margin-top:8px;background:var(--text-2);">구글시트에 저장하기 | Save to Sheet</button>
+            <button class="submit-btn" id="sync-to-sheet-btn" type="button" style="margin-top:8px;background:var(--text-2);">동기화 | Sync</button>
             <div id="sheet-sync-result" style="font-size:13px;margin-top:10px;white-space:pre-line;"></div>
           </div>
         </div>
@@ -552,27 +605,42 @@ function normText(val) {
   if (val === null || val === undefined) return "";
   return String(val).split("|")[0].replace(/\s+/g, "").trim();
 }
+const HEADER_LIKE_WORDS = new Set(["이름", "학년", "반", "name", "담임", "start date", "end date", "분류", "상세"]);
+
 function parseSheetRow(row) {
   const get = i => (row[i] !== undefined && row[i] !== null ? row[i] : "");
-  const startDate = extractDate(get(0));
-  if (!startDate) return null;
-  const studentName = String(get(6)).trim();
-  if (!studentName) return null;
+  const rawStart = get(0);
+  const rawName = String(get(6)).trim();
+  const startDate = extractDate(rawStart);
+  const studentName = rawName;
+
+  const blank = !String(rawStart).trim() && !studentName;
+  if (blank) return { ok: true, skip: true };
+
+  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(startDate);
+  const looksLikeHeader = HEADER_LIKE_WORDS.has(studentName.toLowerCase());
+  if (!validDate || !studentName || looksLikeHeader) {
+    return { ok: false, raw: row.slice(0, 10) };
+  }
+
   const endDate = extractDate(get(1)) || startDate;
   const categoryShort = normText(get(8));
   const detailShort = normText(get(9));
   const periodsRaw = String(get(13) || "").trim();
   return {
-    startDate, endDate,
-    grade: String(get(3) || "").trim(),
-    cls: String(get(4) || "").trim(),
-    studentName,
-    studentEngName: String(get(7) || "").trim(),
-    category: categoryShort,
-    detail: detailShort,
-    reason: String(get(12) || get(10) || "").trim(),
-    attendanceType: (categoryShort && detailShort) ? (detailShort + categoryShort) : normText(get(11)),
-    periods: periodsRaw ? periodsRaw.split(",").map(p => p.trim()).filter(Boolean) : []
+    ok: true,
+    data: {
+      startDate, endDate,
+      grade: String(get(3) || "").trim(),
+      cls: String(get(4) || "").trim(),
+      studentName,
+      studentEngName: String(get(7) || "").trim(),
+      category: categoryShort,
+      detail: detailShort,
+      reason: String(get(12) || get(10) || "").trim(),
+      attendanceType: (categoryShort && detailShort) ? (detailShort + categoryShort) : normText(get(11)),
+      periods: periodsRaw ? periodsRaw.split(",").map(p => p.trim()).filter(Boolean) : []
+    }
   };
 }
 
@@ -614,7 +682,9 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
     const result = await res.json();
     if (!result.ok) throw new Error(result.error || "unknown error");
 
-    const parsedRows = result.rows.map(parseSheetRow).filter(Boolean);
+    const parseResults = result.rows.map((row, idx) => ({ idx, res: parseSheetRow(row) }));
+    const parsedRows = parseResults.filter(x => x.res.ok && !x.res.skip).map(x => x.res.data);
+    const invalidRows = parseResults.filter(x => !x.res.ok);
 
     btn.textContent = "기존 기록 삭제 중... | Removing old imported records...";
     const oldSnap = await getDocs(query(collection(db, "attendanceReports"), where("importedFromLegacy", "==", true)));
@@ -634,14 +704,17 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
 
     btn.textContent = `새 기록 저장 중... 0/${parsedRows.length} | Saving... 0/${parsedRows.length}`;
     let matched = 0, unmatched = 0, opsInBatch = 0, written = 0;
-    const unmatchedNames = [];
+    const unmatchedDetails = [];
     let batch = writeBatch(db);
 
     for (const r of parsedRows) {
       const student = studentRoster.find(s =>
         s.name === r.studentName && (!r.grade || s.grade === r.grade) && (!r.cls || s.cls === r.cls)
       ) || studentRoster.find(s => s.name === r.studentName);
-      if (student) matched++; else { unmatched++; unmatchedNames.push(r.studentName); }
+      if (student) matched++; else {
+        unmatched++;
+        unmatchedDetails.push(`${r.studentName} (${r.grade}${r.cls || ""}, ${r.startDate})`);
+      }
 
       const reportRef = doc(collection(db, "attendanceReports"));
       const reportData = {
@@ -655,7 +728,8 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
         periods: r.periods, attendanceType: r.attendanceType,
         createdBy: myStaff.email, createdByName: myStaff.name,
         createdAt: serverTimestamp(),
-        importedFromLegacy: true
+        importedFromLegacy: true,
+        synced: true, syncedAt: serverTimestamp() // 이미 시트에서 온 데이터이므로 재전송 대상 아님
       };
       batch.set(reportRef, reportData);
       opsInBatch++; written++;
@@ -685,7 +759,12 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
     resultEl.textContent =
       `불러오기 완료: ${written}건 (학생 매칭 ${matched} / 실패 ${unmatched})\n` +
       `Load done: ${written} rows (matched ${matched} / unmatched ${unmatched})` +
-      (unmatched > 0 ? `\n매칭 실패 | Unmatched: ${[...new Set(unmatchedNames)].join(", ")}` : "");
+      (unmatched > 0 ? `\n매칭 실패 | Unmatched:\n${unmatchedDetails.join("\n")}` : "") +
+      (invalidRows.length > 0
+        ? `\n\n무시된 무효 행 ${invalidRows.length}건 (시트 기준 ${invalidRows.map(x => x.idx + 2).join(",")}행) — 날짜 형식이 이상하거나 헤더가 잘못 섞여 있을 수 있습니다.\n` +
+          `Skipped ${invalidRows.length} invalid row(s) (sheet row ${invalidRows.map(x => x.idx + 2).join(",")}) — check date format or stray header text.\n` +
+          invalidRows.map(x => `행 ${x.idx + 2}: [${x.res.raw.join(" | ")}]`).join("\n")
+        : "");
   } catch (err) {
     console.error(err);
     resultEl.textContent = "불러오기 실패 | Load failed: " + err.message;
@@ -696,38 +775,47 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
 });
 
 // ----- 구글시트에 저장하기 (앱 → 시트, 시트 전체 교체) -----
-document.getElementById("save-to-sheet-btn").addEventListener("click", async () => {
-  const btn = document.getElementById("save-to-sheet-btn");
+document.getElementById("sync-to-sheet-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("sync-to-sheet-btn");
   const resultEl = document.getElementById("sheet-sync-result");
   if (!SHEET_SYNC_URL) { showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set"); return; }
-  if (!confirm("시트의 기존 내용을 지우고 앱의 현재 출결 데이터 전체로 덮어씁니다. 계속할까요?\nThis clears the sheet and rewrites it with all current attendance data from the app. Continue?")) return;
 
   btn.disabled = true;
-  btn.textContent = "앱 데이터 조회 중... | Reading app data...";
+  btn.textContent = "미동기화 기록 조회 중... | Checking pending records...";
   resultEl.textContent = "";
   try {
-    const snap = await getDocs(collection(db, "attendanceReports"));
-    const all = [];
-    snap.forEach(d => all.push(d.data()));
-    const sorted = sortByStartDate(all);
+    const snap = await getDocs(query(collection(db, "attendanceReports"), where("synced", "==", false)));
+    const pending = [];
+    snap.forEach(d => pending.push({ id: d.id, ...d.data() }));
+    if (pending.length === 0) {
+      resultEl.textContent = "동기화할 새 기록이 없습니다 | Nothing new to sync";
+      return;
+    }
+    const sorted = sortByStartDate(pending);
     const rows = sorted.map(buildSyncRow);
 
-    btn.textContent = `시트에 쓰는 중... | Writing to sheet...`;
+    btn.textContent = `시트에 추가하는 중... | Appending to sheet...`;
     const res = await fetch(SHEET_SYNC_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, action: "save", rows })
+      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, action: "append", rows })
     });
     const result = await res.json();
     if (!result.ok) throw new Error(result.error || "unknown error");
 
-    resultEl.textContent = `저장 완료: ${result.count}건 | Saved ${result.count} rows to sheet`;
+    const batch = writeBatch(db);
+    sorted.forEach(r => {
+      batch.update(doc(db, "attendanceReports", r.id), { synced: true, syncedAt: serverTimestamp() });
+    });
+    await batch.commit();
+
+    resultEl.textContent = `동기화 완료: ${result.count}건 시트에 추가됨 | Synced ${result.count} new rows to sheet`;
   } catch (err) {
     console.error(err);
     resultEl.textContent = "저장 실패 | Save failed: " + err.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = "구글시트에 저장하기 | Save to Sheet";
+    btn.textContent = "동기화 | Sync";
   }
 });
 
@@ -1021,64 +1109,195 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove("show"), 2200);
 }
 
-// ===== 최근 기록 =====
+// ===== 최근 기록 (목록 / 월별 / 달력) =====
+let myReportsCache = [];
+let myDailyCache = [];
+let monthCursor = new Date();
+let calendarCursor = new Date();
+let selectedCalDate = null;
+
+function buildRecordCardEl(r, dateLabel) {
+  const color = CATEGORY_COLOR[r.category] || "var(--text-2)";
+  const periodStr = (r.periods && r.periods.length) ? `${r.periods.join(",")}교시 | P${r.periods.join(",")}` : "";
+  const catEn = (CATEGORY_LABEL[r.category] || "").split("|")[1];
+  const detEn = (DETAIL_LABEL[r.detail] || "").split("|")[1];
+  const enBadge = [detEn, catEn].filter(Boolean).map(s => s.trim()).join(" ");
+  const nameStr = r.studentEngName ? `${r.studentName} · ${r.studentEngName}` : r.studentName;
+  const syncLine = r.synced !== undefined
+    ? `<div class="meta" style="margin-top:6px;">${r.synced
+        ? '<span style="color:#1E8E3E;">✓ 시트 동기화됨 | Synced to sheet</span>'
+        : '<span style="color:var(--late);">○ 동기화 대기 중 | Pending sync</span>'}</div>`
+    : "";
+  const card = document.createElement("div");
+  card.className = "record-card";
+  card.style.borderLeftColor = color;
+  card.innerHTML = `
+    <div class="summary-row">
+      <span class="summary-text">
+        <span class="student-name">${nameStr}</span>
+        <span class="sub-inline">${r.grade}${r.cls || ""}</span> ·
+        <span class="type-badge" style="color:${color};">${r.attendanceType}${enBadge ? " | " + enBadge : ""}</span> ·
+        <span class="sub-inline">${dateLabel}</span>
+      </span>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="record-detail">
+      ${periodStr ? `<div class="meta">${periodStr}</div>` : ""}
+      <div class="reason">${r.reason || ""}</div>
+      ${syncLine}
+    </div>
+  `;
+  card.querySelector(".summary-row").addEventListener("click", () => card.classList.toggle("expanded"));
+  return card;
+}
+
+async function fetchRecentData() {
+  const [reportsSnap, dailySnap] = await Promise.all([
+    getDocs(query(collection(db, "attendanceReports"), where("createdBy", "==", myStaff.email))),
+    getDocs(query(collection(db, "attendanceDaily"), where("createdBy", "==", myStaff.email)))
+  ]);
+  myReportsCache = [];
+  reportsSnap.forEach(d => myReportsCache.push(d.data()));
+  myDailyCache = [];
+  dailySnap.forEach(d => myDailyCache.push(d.data()));
+}
+
+function renderListMode() {
+  const listEl = document.getElementById("recent-list");
+  const startFilter = document.getElementById("recent-filter-start").value;
+  const endFilter = document.getElementById("recent-filter-end").value;
+
+  let items = myReportsCache;
+  if (startFilter) items = items.filter(r => r.endDate >= startFilter);
+  if (endFilter) items = items.filter(r => r.startDate <= endFilter);
+  items = sortByStartDate(items).reverse();
+
+  if (items.length === 0) {
+    listEl.innerHTML = `<div class="empty-msg">기록이 없습니다 | No records</div>`;
+    return;
+  }
+  listEl.innerHTML = "";
+  items.forEach(r => {
+    const dateLabel = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
+    listEl.appendChild(buildRecordCardEl(r, dateLabel));
+  });
+}
+
+function monthKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
+
+function renderMonthMode() {
+  const key = monthKey(monthCursor);
+  document.getElementById("month-label").textContent =
+    `${monthCursor.getFullYear()}년 ${monthCursor.getMonth() + 1}월 | ${monthCursor.toLocaleString("en-US", { month: "long" })} ${monthCursor.getFullYear()}`;
+  const items = myDailyCache.filter(r => r.date.startsWith(key))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const listEl = document.getElementById("month-list");
+  if (items.length === 0) {
+    listEl.innerHTML = `<div class="empty-msg">이 달 기록이 없습니다 | No records this month</div>`;
+    return;
+  }
+  listEl.innerHTML = "";
+  items.forEach(r => listEl.appendChild(buildRecordCardEl(r, r.date)));
+}
+
+function renderCalendarDayList(dateStr) {
+  const listEl = document.getElementById("calendar-day-list");
+  const items = myDailyCache.filter(r => r.date === dateStr);
+  if (items.length === 0) {
+    listEl.innerHTML = `<div class="empty-msg">${dateStr}: 기록 없음 | No records</div>`;
+    return;
+  }
+  listEl.innerHTML = `<div class="field-label" style="margin-bottom:8px;">${dateStr}</div>`;
+  items.forEach(r => listEl.appendChild(buildRecordCardEl(r, dateStr)));
+}
+
+function renderCalendarMode() {
+  const year = calendarCursor.getFullYear();
+  const month = calendarCursor.getMonth();
+  document.getElementById("cal-label").textContent =
+    `${year}년 ${month + 1}월 | ${calendarCursor.toLocaleString("en-US", { month: "long" })} ${year}`;
+
+  const startWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const byDate = {};
+  myDailyCache.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r); });
+
+  const gridEl = document.getElementById("calendar-grid");
+  gridEl.innerHTML = "";
+  for (let i = 0; i < startWeekday; i++) {
+    const empty = document.createElement("div");
+    empty.className = "cal-cell empty-cell";
+    gridEl.appendChild(empty);
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dayRecords = byDate[dateStr] || [];
+    const cell = document.createElement("div");
+    cell.className = "cal-cell" + (dayRecords.length ? " has-records" : "") + (dateStr === selectedCalDate ? " selected" : "");
+    const dotsHtml = dayRecords.slice(0, 4)
+      .map(r => `<span class="cal-dot" style="background:${CATEGORY_COLOR[r.category] || "var(--text-2)"};"></span>`).join("");
+    cell.innerHTML = `<span class="cal-daynum">${day}</span><div class="cal-dot-row">${dotsHtml}</div>` +
+      (dayRecords.length > 4 ? `<span class="cal-more">+${dayRecords.length - 4}</span>` : "");
+    cell.addEventListener("click", () => {
+      selectedCalDate = dateStr;
+      renderCalendarMode();
+    });
+    gridEl.appendChild(cell);
+  }
+
+  document.getElementById("calendar-day-list").innerHTML = "";
+  if (selectedCalDate) renderCalendarDayList(selectedCalDate);
+}
+
+document.getElementById("recent-mode-group").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  document.querySelectorAll("#recent-mode-group .chip").forEach(c => c.classList.remove("selected"));
+  chip.classList.add("selected");
+  const mode = chip.dataset.mode;
+  document.getElementById("recent-mode-list").style.display = mode === "list" ? "block" : "none";
+  document.getElementById("recent-mode-month").style.display = mode === "month" ? "block" : "none";
+  document.getElementById("recent-mode-calendar").style.display = mode === "calendar" ? "block" : "none";
+  if (mode === "list") renderListMode();
+  if (mode === "month") renderMonthMode();
+  if (mode === "calendar") renderCalendarMode();
+});
+document.getElementById("recent-filter-start").addEventListener("change", renderListMode);
+document.getElementById("recent-filter-end").addEventListener("change", renderListMode);
+document.getElementById("recent-filter-clear-btn").addEventListener("click", () => {
+  document.getElementById("recent-filter-start").value = "";
+  document.getElementById("recent-filter-end").value = "";
+  renderListMode();
+});
+document.getElementById("month-prev-btn").addEventListener("click", () => {
+  monthCursor.setMonth(monthCursor.getMonth() - 1);
+  renderMonthMode();
+});
+document.getElementById("month-next-btn").addEventListener("click", () => {
+  monthCursor.setMonth(monthCursor.getMonth() + 1);
+  renderMonthMode();
+});
+document.getElementById("cal-prev-btn").addEventListener("click", () => {
+  calendarCursor.setMonth(calendarCursor.getMonth() - 1);
+  selectedCalDate = null;
+  renderCalendarMode();
+});
+document.getElementById("cal-next-btn").addEventListener("click", () => {
+  calendarCursor.setMonth(calendarCursor.getMonth() + 1);
+  selectedCalDate = null;
+  renderCalendarMode();
+});
+
 async function loadRecentRecords() {
   const listEl = document.getElementById("recent-list");
   listEl.innerHTML = `<div class="empty-msg">불러오는 중... | Loading...</div>`;
   try {
-    const q = query(
-      collection(db, "attendanceReports"),
-      where("createdBy", "==", myStaff.email),
-      orderBy("createdAt", "desc"),
-      limit(20)
-    );
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      listEl.innerHTML = `<div class="empty-msg">입력한 기록이 없습니다 | No records yet</div>`;
-      return;
-    }
-    const records = [];
-    snap.forEach(d => records.push(d.data()));
-    // 출결 날짜(startDate) 기준 최신순 재정렬 (createdAt이 아니라 실제 출결일 기준)
-    records.sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : 0));
-
-    listEl.innerHTML = "";
-    records.forEach(r => {
-      const color = CATEGORY_COLOR[r.category] || "var(--text-2)";
-      const dateStr = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
-      const periodStr = (r.periods && r.periods.length) ? `${r.periods.join(",")}교시 | P${r.periods.join(",")}` : "";
-      const catEn = (CATEGORY_LABEL[r.category] || "").split("|")[1];
-      const detEn = (DETAIL_LABEL[r.detail] || "").split("|")[1];
-      const enBadge = [detEn, catEn].filter(Boolean).map(s => s.trim()).join(" ");
-      const nameStr = r.studentEngName ? `${r.studentName} · ${r.studentEngName}` : r.studentName;
-      const card = document.createElement("div");
-      card.className = "record-card";
-      card.style.borderLeftColor = color;
-      card.innerHTML = `
-        <div class="summary-row">
-          <span class="summary-text">
-            <span class="student-name">${nameStr}</span>
-            <span class="sub-inline">${r.grade}${r.cls||""}</span> ·
-            <span class="type-badge" style="color:${color};">${r.attendanceType}${enBadge ? " | " + enBadge : ""}</span> ·
-            <span class="sub-inline">${dateStr}</span>
-          </span>
-          <span class="chevron">▾</span>
-        </div>
-        <div class="record-detail">
-          ${periodStr ? `<div class="meta">${periodStr}</div>` : ""}
-          <div class="reason">${r.reason || ""}</div>
-          <div class="meta" style="margin-top:6px;">
-            ${r.synced
-              ? '<span style="color:#1E8E3E;">✓ 시트 동기화됨 | Synced to sheet</span>'
-              : '<span style="color:var(--late);">○ 동기화 대기 중 | Pending sync</span>'}
-          </div>
-        </div>
-      `;
-      card.querySelector(".summary-row").addEventListener("click", () => {
-        card.classList.toggle("expanded");
-      });
-      listEl.appendChild(card);
-    });
+    await fetchRecentData();
+    const activeMode = document.querySelector("#recent-mode-group .chip.selected")?.dataset.mode || "list";
+    renderListMode();
+    if (activeMode === "month") renderMonthMode();
+    if (activeMode === "calendar") renderCalendarMode();
   } catch (err) {
     console.error(err);
     listEl.innerHTML = `<div class="empty-msg">불러오기 실패 | Failed to load: ${err.message}</div>`;
