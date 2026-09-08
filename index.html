@@ -620,7 +620,7 @@ function buildSyncRow(r) {
   const dates = dateRange(r.startDate, r.endDate);
   const endPlus1 = new Date(r.endDate + "T00:00:00");
   endPlus1.setDate(endPlus1.getDate() + 1);
-  const endPlus1Str = endPlus1.toISOString().slice(0, 10);
+  const endPlus1Str = toLocalDateStr(endPlus1);
 
   const row = [
     r.startDate, r.endDate, endPlus1Str,
@@ -1043,7 +1043,7 @@ document.getElementById("clear-student-btn").addEventListener("click", () => {
 
 // ===== 날짜 =====
 function initTodayDates() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toLocalDateStr(new Date());
   document.getElementById("start-date").value = today;
   document.getElementById("end-date").value = today;
 }
@@ -1094,12 +1094,20 @@ function updateSubmitState() {
 }
 
 // ===== 제출 =====
+// 주의: toISOString()은 UTC 기준이라 한국(UTC+9)에서는 날짜가 하루 앞당겨지는 버그가 생김.
+// 반드시 로컬 날짜 요소로 직접 포맷할 것.
+function toLocalDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 function dateRange(startStr, endStr) {
   const dates = [];
   let cur = new Date(startStr + "T00:00:00");
   const end = new Date(endStr + "T00:00:00");
   while (cur <= end) {
-    dates.push(cur.toISOString().slice(0, 10));
+    dates.push(toLocalDateStr(cur));
     cur.setDate(cur.getDate() + 1);
   }
   return dates;
@@ -1227,7 +1235,7 @@ function buildRecordCardEl(r, dateLabel) {
 
 // ===== 오늘 화면 (학교 전체 — 본인 것만이 아님) =====
 async function loadTodayList() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toLocalDateStr(new Date());
   document.getElementById("today-date-label").textContent = `오늘 (${today}) | Today`;
   const listEl = document.getElementById("today-list");
   listEl.innerHTML = `<div class="empty-msg">불러오는 중... | Loading...</div>`;
@@ -1328,7 +1336,7 @@ function renderCalendarMode() {
   function addDays(dateStr, n) {
     const d = new Date(dateStr + "T00:00:00");
     d.setDate(d.getDate() + n);
-    return d.toISOString().slice(0, 10);
+    return toLocalDateStr(d);
   }
 
   const MAX_CHIPS = 3;
@@ -1416,8 +1424,8 @@ async function loadRecentRecords() {
       const today = new Date();
       const start = new Date();
       start.setDate(today.getDate() - 3);
-      document.getElementById("recent-filter-start").value = start.toISOString().slice(0, 10);
-      document.getElementById("recent-filter-end").value = today.toISOString().slice(0, 10);
+      document.getElementById("recent-filter-start").value = toLocalDateStr(start);
+      document.getElementById("recent-filter-end").value = toLocalDateStr(today);
       recentFilterDefaultSet = true;
     }
     const activeMode = document.querySelector("#recent-mode-group .chip.selected")?.dataset.mode || "list";
