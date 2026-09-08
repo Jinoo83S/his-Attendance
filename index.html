@@ -332,6 +332,7 @@
             </p>
             <textarea id="legacy-import-textarea" style="min-height:120px;font-family:monospace;font-size:12px;" placeholder="여기에 붙여넣기 | Paste here"></textarea>
             <button class="submit-btn" id="legacy-import-btn" type="button" style="margin-top:10px;">가져오기 | Import</button>
+            <button class="submit-btn" id="resync-imported-btn" type="button" style="margin-top:8px;background:var(--text-2);">과거 가져오기 기록 재동기화 | Resync Imported Records</button>
             <div id="legacy-import-result" style="font-size:13px;margin-top:10px;white-space:pre-line;"></div>
           </div>
         </div>
@@ -702,6 +703,7 @@ document.getElementById("legacy-import-btn").addEventListener("click", async () 
 
   let matched = 0, unmatched = 0, opsInBatch = 0;
   const unmatchedNames = [];
+  const importedForSync = []; // {id, ...reportData} — 저장 직후 자동 동기화용
   let batch = writeBatch(db);
 
   for (const r of rows) {
@@ -724,10 +726,11 @@ document.getElementById("legacy-import-btn").addEventListener("click", async () 
       legacyHomeroom: r.legacyHomeroom || "",
       createdBy: myStaff.email, createdByName: myStaff.name,
       createdAt: serverTimestamp(),
-      synced: true, syncedAt: null, // 이미 기존 시트에 있는 데이터이므로 재동기화 대상 아님
+      synced: false, syncedAt: null, // 붙여넣은 데이터는 새 시트에 아직 없음 — 동기화 대상
       importedFromLegacy: true
     };
     batch.set(reportRef, reportData);
+    importedForSync.push({ id: reportRef.id, ...reportData });
     opsInBatch++;
 
     dateRange(r.startDate, r.endDate).forEach(dateStr => {
@@ -751,13 +754,72 @@ document.getElementById("legacy-import-btn").addEventListener("click", async () 
   }
   if (opsInBatch > 0) await batch.commit();
 
+  let syncedCount = 0, syncError = "";
+  if (SHEET_SYNC_URL) {
+    try {
+      syncedCount = await syncInChunks(importedForSync, (done, total) => {
+        btn.textContent = `시트 동기화 중... ${done}/${total} | Syncing... ${done}/${total}`;
+      });
+    } catch (err) {
+      syncError = err.message;
+    }
+  }
+
   resultEl.textContent =
     `완료: ${rows.length}건 처리 (학생 매칭 ${matched} / 실패 ${unmatched})\n` +
     `Done: ${rows.length} rows (matched ${matched} / unmatched ${unmatched})` +
-    (unmatched > 0 ? `\n매칭 실패 | Unmatched: ${[...new Set(unmatchedNames)].join(", ")}` : "");
+    (unmatched > 0 ? `\n매칭 실패 | Unmatched: ${[...new Set(unmatchedNames)].join(", ")}` : "") +
+    (SHEET_SYNC_URL
+      ? `\n시트 동기화: ${syncedCount}/${rows.length}건 | Synced to sheet: ${syncedCount}/${rows.length}` + (syncError ? ` (오류 | error: ${syncError})` : "")
+      : `\n시트 URL 미설정 — 동기화 안 됨 | Sheet URL not set — not synced`);
 
   btn.disabled = false;
   btn.textContent = "가져오기 | Import";
+});
+
+// 대량 레코드를 여러 건씩 나눠서 순차 동기화 (한 번의 POST가 너무 커지지 않도록)
+async function syncInChunks(reportsWithId, onProgress, chunkSize = 150) {
+  let done = 0;
+  for (let i = 0; i < reportsWithId.length; i += chunkSize) {
+    const chunk = reportsWithId.slice(i, i + chunkSize);
+    await syncReports(chunk);
+    done += chunk.length;
+    if (onProgress) onProgress(done, reportsWithId.length);
+  }
+  return done;
+}
+
+// ===== 이미 가져온(과거) 기록 중 아직 시트에 안 들어간 것 재동기화 =====
+document.getElementById("resync-imported-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("resync-imported-btn");
+  const resultEl = document.getElementById("legacy-import-result");
+  if (!SHEET_SYNC_URL) {
+    showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set");
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "확인 중... | Checking...";
+  try {
+    const q = query(collection(db, "attendanceReports"), where("importedFromLegacy", "==", true));
+    const snap = await getDocs(q);
+    const all = [];
+    snap.forEach(d => all.push({ id: d.id, ...d.data() }));
+    if (all.length === 0) {
+      resultEl.textContent = "가져온 기록이 없습니다 | No imported records found";
+      return;
+    }
+    btn.textContent = `동기화 중... 0/${all.length} | Syncing... 0/${all.length}`;
+    const done = await syncInChunks(all, (d, total) => {
+      btn.textContent = `동기화 중... ${d}/${total} | Syncing... ${d}/${total}`;
+    });
+    resultEl.textContent = `과거 가져오기 기록 재동기화 완료: ${done}건 | Resynced ${done} imported records`;
+  } catch (err) {
+    console.error(err);
+    resultEl.textContent = "재동기화 실패 | Resync failed: " + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "과거 가져오기 기록 재동기화 | Resync Imported Records";
+  }
 });
 async function loadStudentRoster() {
   studentRoster = [];
@@ -1058,6 +1120,11 @@ async function loadRecentRecords() {
         <div class="record-detail">
           ${periodStr ? `<div class="meta">${periodStr}</div>` : ""}
           <div class="reason">${r.reason || ""}</div>
+          <div class="meta" style="margin-top:6px;">
+            ${r.synced
+              ? '<span style="color:#1E8E3E;">✓ 시트 동기화됨 | Synced to sheet</span>'
+              : '<span style="color:var(--late);">○ 동기화 대기 중 | Pending sync</span>'}
+          </div>
         </div>
       `;
       card.querySelector(".summary-row").addEventListener("click", () => {
