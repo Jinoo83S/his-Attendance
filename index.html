@@ -360,7 +360,7 @@ let CURRENT_YEAR = null; // settings/general.currentYear 에서 로드 (his-main
 
 // TODO: Apps Script 배포 후 아래 두 값을 채우세요 (sheet-sync-apps-script.gs 참고)
 const SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbxDpd3AQMa7uvSPO5ebUS24sMrkvxR9_L4gMMqxPvvvH54eqW97ELFL6JRmspnrG1Hc/exec"; // 예: "https://script.google.com/macros/s/AKfycb.../exec"
-const SHEET_SYNC_TOKEN = "https://script.google.com/macros/s/AKfycbxDpd3AQMa7uvSPO5ebUS24sMrkvxR9_L4gMMqxPvvvH54eqW97ELFL6JRmspnrG1Hc/exec"; // gs 파일의 SECRET_TOKEN과 동일한 값
+const SHEET_SYNC_TOKEN = "his_attendance_token"; // gs 파일의 SECRET_TOKEN과 동일한 값
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
