@@ -317,24 +317,28 @@
 
         <div class="card">
           <div class="field">
-            <span class="field-label">구글시트 동기화 | Sheet Sync</span>
-            <p id="sync-status-text" style="font-size:13px;margin-bottom:10px;">확인 중... | Checking...</p>
-            <button class="submit-btn" id="sync-now-btn" type="button">지금 동기화 | Sync Now</button>
+            <span class="field-label">구글시트 ↔ 앱 | Sheet ↔ App</span>
+            <p style="font-size:12px;color:var(--text-2);margin-bottom:10px;line-height:1.5;">
+              구글시트에 직접 데이터를 입력/수정한 뒤 "불러오기"를 누르면, 앱의 과거 기록이 시트 내용으로 통째로 교체됩니다.<br>
+              Edit data directly in the sheet, then "Load" replaces the app's imported records entirely with the sheet's current content.<br><br>
+              "저장하기"는 반대로 앱에 있는 모든 출결 기록을 시트에 통째로 씁니다 (기존 시트 내용 삭제 후 재작성).<br>
+              "Save" writes all attendance records from the app into the sheet (clears sheet data rows first, then rewrites).
+            </p>
+            <button class="submit-btn" id="load-from-sheet-btn" type="button">구글시트에서 불러오기 | Load from Sheet</button>
+            <button class="submit-btn" id="save-to-sheet-btn" type="button" style="margin-top:8px;background:var(--text-2);">구글시트에 저장하기 | Save to Sheet</button>
+            <div id="sheet-sync-result" style="font-size:13px;margin-top:10px;white-space:pre-line;"></div>
           </div>
         </div>
 
         <div class="card">
           <div class="field">
-            <span class="field-label">과거 기록 가져오기 | Import Historical Records</span>
-            <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;line-height:1.5;">
-              기존 시트에서 헤더 포함 복사 후 붙여넣기(Start Date, End Date, 학년, 반, 담임, 이름, Name, 분류, 상세, Reason/사유, 출결구분, 교시선택).<br>
-              Paste rows copied from the old sheet, including the header row. 한 번만 실행하세요 — 중복 방지 기능 없음 | Run once — no duplicate check.
+            <span class="field-label">전체 출결 데이터 삭제 | Delete All Attendance Data</span>
+            <p style="font-size:12px;color:var(--absence);margin-bottom:10px;line-height:1.5;">
+              attendanceReports/attendanceDaily 전체를 삭제합니다. 구글시트 내용에는 영향 없습니다. 되돌릴 수 없습니다.<br>
+              Deletes ALL attendanceReports/attendanceDaily in Firestore. Does not touch the sheet. Cannot be undone.
             </p>
-            <textarea id="legacy-import-textarea" style="min-height:120px;font-family:monospace;font-size:12px;" placeholder="여기에 붙여넣기 | Paste here"></textarea>
-            <button class="submit-btn" id="legacy-import-btn" type="button" style="margin-top:10px;">가져오기 | Import</button>
-            <button class="submit-btn" id="resync-imported-btn" type="button" style="margin-top:8px;background:var(--text-2);">과거 가져오기 기록 재동기화 | Resync Imported Records</button>
-            <button class="submit-btn" id="dedup-imported-btn" type="button" style="margin-top:8px;background:var(--absence);">중복 정리 (Firestore) | Remove Duplicates</button>
-            <div id="legacy-import-result" style="font-size:13px;margin-top:10px;white-space:pre-line;"></div>
+            <button class="submit-btn" id="delete-all-attendance-btn" type="button" style="background:var(--absence);">전체 삭제 | Delete Everything</button>
+            <div id="delete-all-result" style="font-size:13px;margin-top:10px;white-space:pre-line;"></div>
           </div>
         </div>
       </div>
@@ -484,7 +488,6 @@ function showView(viewId) {
   if (viewId === "view-recent") loadRecentRecords();
   if (viewId === "view-admin") {
     document.getElementById("admin-year-input").value = CURRENT_YEAR || "";
-    updateSyncStatus();
   }
 }
 document.querySelectorAll(".nav-btn").forEach(btn => {
@@ -506,9 +509,8 @@ document.getElementById("admin-year-save-btn").addEventListener("click", async (
   }
 });
 
-// ===== 구글시트 동기화 =====
+// ===== 구글시트 ↔ 앱 (전체 불러오기/저장하기) =====
 function formatDotDate(iso) {
-  // "2026-03-03" -> "2026.03.03."
   const [y, m, d] = iso.split("-");
   return `${y}.${m}.${d}.`;
 }
@@ -519,401 +521,251 @@ function buildSyncRow(r) {
   const endPlus1Str = endPlus1.toISOString().slice(0, 10);
 
   const row = [
-    r.startDate,                          // Start Date
-    r.endDate,                            // End Date
-    endPlus1Str,                          // End Date+1
-    r.grade,                              // 학년
-    r.cls,                                // 반
-    "",                                   // 담임 (미구현 — 백로그)
-    r.studentName,                        // 이름
-    r.studentEngName || "",               // Name
-    r.category,                           // 분류
-    r.detail,                             // 상세
-    r.reason,                             // Reason
-    r.attendanceType,                     // 출결구분
-    r.reason,                             // 사유
-    (r.periods || []).join(" , "),        // 교시선택
-    "",                                   // 서류 (미구현 — 백로그)
-    formatDotDate(r.startDate),           // 시작일자
-    formatDotDate(r.endDate),             // 끝일자
-    String(dates.length),                 // 날짜확인
+    r.startDate, r.endDate, endPlus1Str,
+    r.grade, r.cls,
+    "", // 담임 (미구현 — 백로그)
+    r.studentName, r.studentEngName || "",
+    r.category, r.detail, r.reason,
+    r.attendanceType, r.reason,
+    (r.periods || []).join(" , "),
+    "", // 서류 (미구현 — 백로그)
+    formatDotDate(r.startDate), formatDotDate(r.endDate), String(dates.length)
   ];
-  dates.forEach(d => row.push(formatDotDate(d))); // 날짜1, 날짜2, ...
+  dates.forEach(d => row.push(formatDotDate(d)));
   return row;
 }
-
 function sortByStartDate(list) {
   return [...list].sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
 }
 
-// 과거 가져오기 중복 판별용 합성키 (같은 학생/기간/분류/상세/사유면 동일 건으로 간주)
-function legacyDedupKey(r) {
-  return [r.studentName, r.startDate, r.endDate, r.category, r.detail, r.reason].join("|");
-}
-
-async function getUnsyncedReports() {
-  const q = query(collection(db, "attendanceReports"), where("synced", "==", false));
-  const snap = await getDocs(q);
-  const list = [];
-  snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-  return sortByStartDate(list);
-}
-
-// 공용 동기화 실행기: 수동 배치 버튼과 제출 직후 백그라운드 자동 동기화가 함께 사용
-async function syncReports(reportsWithId) {
-  if (!SHEET_SYNC_URL || reportsWithId.length === 0) return { ok: true, count: 0 };
-  const rows = reportsWithId.map(buildSyncRow);
-  const res = await fetch(SHEET_SYNC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" }, // Apps Script CORS 우회용 (application/json 대신)
-    body: JSON.stringify({ token: SHEET_SYNC_TOKEN, rows })
-  });
-  const result = await res.json();
-  if (!result.ok) throw new Error(result.error || "unknown error");
-
-  const batch = writeBatch(db);
-  reportsWithId.forEach(r => {
-    batch.update(doc(db, "attendanceReports", r.id), { synced: true, syncedAt: serverTimestamp() });
-  });
-  await batch.commit();
-  return result;
-}
-
-// 출결 저장 직후 자동 호출 — 실패해도 조용히 무시 (synced:false로 남아 관리자 수동 동기화로 나중에 처리됨)
-async function backgroundSyncOne(reportId, reportData) {
-  if (!SHEET_SYNC_URL) return;
-  try {
-    await syncReports([{ id: reportId, ...reportData }]);
-  } catch (err) {
-    console.warn("백그라운드 동기화 실패(나중에 관리자 수동 동기화로 재시도됨):", err);
-  }
-}
-
-async function updateSyncStatus() {
-  const statusEl = document.getElementById("sync-status-text");
-  if (!SHEET_SYNC_URL) {
-    statusEl.textContent = "Apps Script URL 미설정 — index.html의 SHEET_SYNC_URL을 채워주세요 | Apps Script URL not configured";
-    document.getElementById("sync-now-btn").disabled = true;
-    return;
-  }
-  try {
-    const unsynced = await getUnsyncedReports();
-    statusEl.textContent = `동기화 대기 중: ${unsynced.length}건 | Pending sync: ${unsynced.length}`;
-  } catch (err) {
-    statusEl.textContent = "상태 확인 실패 | Failed to check: " + err.message;
-  }
-}
-
-document.getElementById("sync-now-btn").addEventListener("click", async () => {
-  const btn = document.getElementById("sync-now-btn");
-  if (!SHEET_SYNC_URL) {
-    showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set");
-    return;
-  }
-  btn.disabled = true;
-  btn.textContent = "동기화 중... | Syncing...";
-  try {
-    const unsynced = await getUnsyncedReports();
-    if (unsynced.length === 0) {
-      showToast("동기화할 기록이 없습니다 | Nothing to sync");
-      return;
-    }
-    const result = await syncReports(unsynced);
-    showToast(`${result.count}건 동기화 완료 | Synced ${result.count} records`);
-    await updateSyncStatus();
-  } catch (err) {
-    console.error(err);
-    showToast("동기화 실패 | Sync failed: " + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "지금 동기화 | Sync Now";
-  }
-});
-
-// ===== 과거 기록 일괄 가져오기 (기존 시트 붙여넣기 → Firestore) =====
-function shortLabel(raw) {
-  if (!raw) return "";
-  return raw.split("|")[0].replace(/\s+/g, "").trim();
-}
-
-// 원본 시트의 고정 컬럼 순서 (헤더 텍스트는 복사 과정에서 깨지는 일이 반복되어 신뢰하지 않음 —
-// 데이터 행은 지금까지 항상 이 순서로 일관되게 확인됨)
-const LEGACY_COL = {
-  start: 0, end: 1, endPlus1: 2, grade: 3, cls: 4, homeroom: 5, name: 6, engName: 7,
-  category: 8, detail: 9, reason: 10, draft: 11, attType: 12, reasonKo: 13, periods: 14
-};
-
-function normalizeDate(raw) {
-  if (!raw) return "";
-  const s = raw.trim();
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
-  m = s.match(/^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?$/); // "2026. 5. 14" 또는 "2026.05.14."
+// 시트에서 읽어온 값 정규화 (Apps Script Date 객체는 ISO 문자열로 직렬화되어 옴)
+function extractDate(val) {
+  if (val === null || val === undefined) return "";
+  const s = String(val);
+  let m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  m = s.match(/^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?/);
   if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
   return s;
 }
-
-function parseLegacyPaste(text) {
-  const lines = text.trim().split(/\r?\n/).filter(l => l.trim().length > 0);
-  if (lines.length === 0) throw new Error("데이터가 없습니다 | No data");
-
-  // 첫 줄이 날짜로 시작하지 않으면 헤더로 간주하고 건너뜀 (헤더 텍스트 자체는 사용 안 함)
-  const firstCell = lines[0].split("\t")[0].trim();
-  const looksLikeDate = /^\d{4}[-.]/.test(firstCell);
-  const dataLines = looksLikeDate ? lines : lines.slice(1);
-  if (dataLines.length === 0) throw new Error("데이터 행이 없습니다 | No data rows");
-
-  const get = (cells, i) => (cells[i] || "").trim();
-  const rows = [];
-  for (const line of dataLines) {
-    const cells = line.split("\t");
-    const studentName = get(cells, LEGACY_COL.name);
-    const startDate = normalizeDate(get(cells, LEGACY_COL.start));
-    if (!startDate || !studentName) continue; // 빈 줄/이름 없는 줄 스킵
-
-    const endDate = normalizeDate(get(cells, LEGACY_COL.end)) || startDate;
-    const categoryShort = shortLabel(get(cells, LEGACY_COL.category));
-    const detailShort = shortLabel(get(cells, LEGACY_COL.detail));
-    const periodsRaw = get(cells, LEGACY_COL.periods);
-
-    rows.push({
-      startDate, endDate,
-      grade: get(cells, LEGACY_COL.grade), cls: get(cells, LEGACY_COL.cls),
-      legacyHomeroom: get(cells, LEGACY_COL.homeroom),
-      studentName, studentEngName: get(cells, LEGACY_COL.engName),
-      category: categoryShort, detail: detailShort,
-      reason: get(cells, LEGACY_COL.reasonKo) || get(cells, LEGACY_COL.reason),
-      attendanceType: (detailShort && categoryShort) ? (detailShort + categoryShort) : get(cells, LEGACY_COL.attType),
-      periods: periodsRaw ? periodsRaw.split(",").map(p => p.trim()).filter(Boolean) : []
-    });
-  }
-  return rows;
+function normText(val) {
+  if (val === null || val === undefined) return "";
+  return String(val).split("|")[0].replace(/\s+/g, "").trim();
+}
+function parseSheetRow(row) {
+  const get = i => (row[i] !== undefined && row[i] !== null ? row[i] : "");
+  const startDate = extractDate(get(0));
+  if (!startDate) return null;
+  const studentName = String(get(6)).trim();
+  if (!studentName) return null;
+  const endDate = extractDate(get(1)) || startDate;
+  const categoryShort = normText(get(8));
+  const detailShort = normText(get(9));
+  const periodsRaw = String(get(13) || "").trim();
+  return {
+    startDate, endDate,
+    grade: String(get(3) || "").trim(),
+    cls: String(get(4) || "").trim(),
+    studentName,
+    studentEngName: String(get(7) || "").trim(),
+    category: categoryShort,
+    detail: detailShort,
+    reason: String(get(12) || get(10) || "").trim(),
+    attendanceType: (categoryShort && detailShort) ? (detailShort + categoryShort) : normText(get(11)),
+    periods: periodsRaw ? periodsRaw.split(",").map(p => p.trim()).filter(Boolean) : []
+  };
 }
 
-document.getElementById("legacy-import-btn").addEventListener("click", async () => {
-  const btn = document.getElementById("legacy-import-btn");
-  const resultEl = document.getElementById("legacy-import-result");
-  const text = document.getElementById("legacy-import-textarea").value;
-
-  let rows;
-  try {
-    rows = parseLegacyPaste(text);
-  } catch (err) {
-    resultEl.textContent = "파싱 실패 | Parse failed: " + err.message;
-    return;
-  }
-  if (rows.length === 0) {
-    resultEl.textContent = "가져올 행이 없습니다 | No rows to import";
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = "중복 확인 중... | Checking duplicates...";
-
-  // 기존에 이미 가져온 기록과, 이번 붙여넣기 안에서의 중복을 모두 제거
-  const existingSnap = await getDocs(query(collection(db, "attendanceReports"), where("importedFromLegacy", "==", true)));
-  const seenKeys = new Set();
-  existingSnap.forEach(d => seenKeys.add(legacyDedupKey(d.data())));
-
-  const dedupedRows = [];
-  let skippedDup = 0;
-  for (const r of rows) {
-    const key = legacyDedupKey(r);
-    if (seenKeys.has(key)) { skippedDup++; continue; }
-    seenKeys.add(key);
-    dedupedRows.push(r);
-  }
-  rows = dedupedRows;
-
-  if (rows.length === 0) {
-    resultEl.textContent = `가져올 새 행이 없습니다 (전부 중복, ${skippedDup}건 스킵) | Nothing new to import (all ${skippedDup} were duplicates)`;
-    btn.disabled = false;
-    btn.textContent = "가져오기 | Import";
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = "가져오는 중... | Importing...";
-  resultEl.textContent = "";
-
-  let matched = 0, unmatched = 0, opsInBatch = 0;
-  const unmatchedNames = [];
-  const importedForSync = []; // {id, ...reportData} — 저장 직후 자동 동기화용
+async function deleteInChunks(refs, onProgress) {
+  let done = 0;
   let batch = writeBatch(db);
-
-  for (const r of rows) {
-    const student = studentRoster.find(s =>
-      s.name === r.studentName && (!r.grade || s.grade === r.grade) && (!r.cls || s.cls === r.cls)
-    ) || studentRoster.find(s => s.name === r.studentName);
-
-    if (student) matched++; else { unmatched++; unmatchedNames.push(r.studentName); }
-
-    const reportRef = doc(collection(db, "attendanceReports"));
-    const reportData = {
-      studentEmail: student ? student.email : "",
-      studentName: r.studentName,
-      studentEngName: r.studentEngName || (student ? student.engName : ""),
-      grade: r.grade || (student ? student.grade : ""),
-      cls: r.cls || (student ? student.cls : ""),
-      startDate: r.startDate, endDate: r.endDate,
-      category: r.category, detail: r.detail, reason: r.reason,
-      periods: r.periods, attendanceType: r.attendanceType,
-      legacyHomeroom: r.legacyHomeroom || "",
-      createdBy: myStaff.email, createdByName: myStaff.name,
-      createdAt: serverTimestamp(),
-      synced: false, syncedAt: null, // 붙여넣은 데이터는 새 시트에 아직 없음 — 동기화 대상
-      importedFromLegacy: true
-    };
-    batch.set(reportRef, reportData);
-    importedForSync.push({ id: reportRef.id, ...reportData });
-    opsInBatch++;
-
-    dateRange(r.startDate, r.endDate).forEach(dateStr => {
-      const dailyRef = doc(db, "attendanceDaily", `${reportRef.id}_${dateStr}`);
-      batch.set(dailyRef, {
-        reportId: reportRef.id, date: dateStr,
-        studentEmail: reportData.studentEmail, studentName: r.studentName,
-        grade: reportData.grade, cls: reportData.cls,
-        category: r.category, detail: r.detail, reason: r.reason,
-        periods: r.periods, attendanceType: r.attendanceType,
-        createdBy: myStaff.email, createdByName: myStaff.name
-      });
-      opsInBatch++;
-    });
-
+  let opsInBatch = 0;
+  for (const ref of refs) {
+    batch.delete(ref);
+    opsInBatch++; done++;
     if (opsInBatch >= 400) {
       await batch.commit();
       batch = writeBatch(db);
       opsInBatch = 0;
+      if (onProgress) onProgress(done, refs.length);
     }
   }
   if (opsInBatch > 0) await batch.commit();
-
-  let syncedCount = 0, syncError = "";
-  if (SHEET_SYNC_URL) {
-    try {
-      syncedCount = await syncInChunks(sortByStartDate(importedForSync), (done, total) => {
-        btn.textContent = `시트 동기화 중... ${done}/${total} | Syncing... ${done}/${total}`;
-      });
-    } catch (err) {
-      syncError = err.message;
-    }
-  }
-
-  resultEl.textContent =
-    `완료: ${rows.length}건 신규 처리, 중복 ${skippedDup}건 스킵 (학생 매칭 ${matched} / 실패 ${unmatched})\n` +
-    `Done: ${rows.length} new rows, skipped ${skippedDup} duplicates (matched ${matched} / unmatched ${unmatched})` +
-    (unmatched > 0 ? `\n매칭 실패 | Unmatched: ${[...new Set(unmatchedNames)].join(", ")}` : "") +
-    (SHEET_SYNC_URL
-      ? `\n시트 동기화: ${syncedCount}/${rows.length}건 | Synced to sheet: ${syncedCount}/${rows.length}` + (syncError ? ` (오류 | error: ${syncError})` : "")
-      : `\n시트 URL 미설정 — 동기화 안 됨 | Sheet URL not set — not synced`);
-
-  btn.disabled = false;
-  btn.textContent = "가져오기 | Import";
-});
-
-// 대량 레코드를 여러 건씩 나눠서 순차 동기화 (한 번의 POST가 너무 커지지 않도록)
-async function syncInChunks(reportsWithId, onProgress, chunkSize = 150) {
-  let done = 0;
-  for (let i = 0; i < reportsWithId.length; i += chunkSize) {
-    const chunk = reportsWithId.slice(i, i + chunkSize);
-    await syncReports(chunk);
-    done += chunk.length;
-    if (onProgress) onProgress(done, reportsWithId.length);
-  }
+  if (onProgress) onProgress(done, refs.length);
   return done;
 }
 
-// ===== 이미 가져온(과거) 기록 중 아직 시트에 안 들어간 것 재동기화 =====
-document.getElementById("resync-imported-btn").addEventListener("click", async () => {
-  const btn = document.getElementById("resync-imported-btn");
-  const resultEl = document.getElementById("legacy-import-result");
-  if (!SHEET_SYNC_URL) {
-    showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set");
-    return;
-  }
+// ----- 구글시트에서 불러오기 (시트 → 앱, 과거 가져오기 기록 전체 교체) -----
+document.getElementById("load-from-sheet-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("load-from-sheet-btn");
+  const resultEl = document.getElementById("sheet-sync-result");
+  if (!SHEET_SYNC_URL) { showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set"); return; }
+  if (!confirm("앱의 기존 '가져오기' 기록을 전부 지우고 시트 내용으로 교체합니다. 계속할까요?\nThis replaces all existing imported records with the sheet's current content. Continue?")) return;
+
   btn.disabled = true;
-  btn.textContent = "확인 중... | Checking...";
+  btn.textContent = "시트 읽는 중... | Reading sheet...";
+  resultEl.textContent = "";
   try {
-    const q = query(collection(db, "attendanceReports"), where("importedFromLegacy", "==", true));
-    const snap = await getDocs(q);
-    const all = [];
-    snap.forEach(d => all.push({ id: d.id, ...d.data() }));
-    const sortedAll = sortByStartDate(all);
-    if (sortedAll.length === 0) {
-      resultEl.textContent = "가져온 기록이 없습니다 | No imported records found";
-      return;
-    }
-    btn.textContent = `동기화 중... 0/${sortedAll.length} | Syncing... 0/${sortedAll.length}`;
-    const done = await syncInChunks(sortedAll, (d, total) => {
-      btn.textContent = `동기화 중... ${d}/${total} | Syncing... ${d}/${total}`;
+    const res = await fetch(SHEET_SYNC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, action: "load" })
     });
-    resultEl.textContent = `과거 가져오기 기록 재동기화 완료: ${done}건 | Resynced ${done} imported records`;
-  } catch (err) {
-    console.error(err);
-    resultEl.textContent = "재동기화 실패 | Resync failed: " + err.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "과거 가져오기 기록 재동기화 | Resync Imported Records";
-  }
-});
+    const result = await res.json();
+    if (!result.ok) throw new Error(result.error || "unknown error");
 
-// ===== Firestore에 이미 쌓인 중복 가져오기 기록 정리 =====
-document.getElementById("dedup-imported-btn").addEventListener("click", async () => {
-  const btn = document.getElementById("dedup-imported-btn");
-  const resultEl = document.getElementById("legacy-import-result");
-  btn.disabled = true;
-  btn.textContent = "중복 검사 중... | Scanning...";
-  try {
-    const snap = await getDocs(query(collection(db, "attendanceReports"), where("importedFromLegacy", "==", true)));
-    const seen = new Set();
-    const toDelete = [];
+    const parsedRows = result.rows.map(parseSheetRow).filter(Boolean);
 
-    snap.forEach(d => {
-      const key = legacyDedupKey(d.data());
-      if (seen.has(key)) {
-        toDelete.push(d.id);
-      } else {
-        seen.add(key);
-      }
+    btn.textContent = "기존 기록 삭제 중... | Removing old imported records...";
+    const oldSnap = await getDocs(query(collection(db, "attendanceReports"), where("importedFromLegacy", "==", true)));
+    const oldReportIds = [];
+    oldSnap.forEach(d => oldReportIds.push(d.id));
+    const oldDailyRefs = [];
+    for (const rid of oldReportIds) {
+      const dSnap = await getDocs(query(collection(db, "attendanceDaily"), where("reportId", "==", rid)));
+      dSnap.forEach(dd => oldDailyRefs.push(doc(db, "attendanceDaily", dd.id)));
+    }
+    await deleteInChunks(oldReportIds.map(id => doc(db, "attendanceReports", id)), (d, t) => {
+      btn.textContent = `기존 기록 삭제 중... ${d}/${t} | Removing... ${d}/${t}`;
+    });
+    await deleteInChunks(oldDailyRefs, (d, t) => {
+      btn.textContent = `기존 일자기록 삭제 중... ${d}/${t} | Removing daily... ${d}/${t}`;
     });
 
-    if (toDelete.length === 0) {
-      resultEl.textContent = "중복이 없습니다 | No duplicates found";
-      return;
-    }
-
-    let deletedReports = 0, deletedDaily = 0, opsInBatch = 0;
+    btn.textContent = `새 기록 저장 중... 0/${parsedRows.length} | Saving... 0/${parsedRows.length}`;
+    let matched = 0, unmatched = 0, opsInBatch = 0, written = 0;
+    const unmatchedNames = [];
     let batch = writeBatch(db);
 
-    for (const reportId of toDelete) {
-      batch.delete(doc(db, "attendanceReports", reportId));
-      opsInBatch++; deletedReports++;
+    for (const r of parsedRows) {
+      const student = studentRoster.find(s =>
+        s.name === r.studentName && (!r.grade || s.grade === r.grade) && (!r.cls || s.cls === r.cls)
+      ) || studentRoster.find(s => s.name === r.studentName);
+      if (student) matched++; else { unmatched++; unmatchedNames.push(r.studentName); }
 
-      const dailySnap = await getDocs(query(collection(db, "attendanceDaily"), where("reportId", "==", reportId)));
-      dailySnap.forEach(dd => {
-        batch.delete(doc(db, "attendanceDaily", dd.id));
-        opsInBatch++; deletedDaily++;
+      const reportRef = doc(collection(db, "attendanceReports"));
+      const reportData = {
+        studentEmail: student ? student.email : "",
+        studentName: r.studentName,
+        studentEngName: r.studentEngName || (student ? student.engName : ""),
+        grade: r.grade || (student ? student.grade : ""),
+        cls: r.cls || (student ? student.cls : ""),
+        startDate: r.startDate, endDate: r.endDate,
+        category: r.category, detail: r.detail, reason: r.reason,
+        periods: r.periods, attendanceType: r.attendanceType,
+        createdBy: myStaff.email, createdByName: myStaff.name,
+        createdAt: serverTimestamp(),
+        importedFromLegacy: true
+      };
+      batch.set(reportRef, reportData);
+      opsInBatch++; written++;
+
+      dateRange(r.startDate, r.endDate).forEach(dateStr => {
+        const dailyRef = doc(db, "attendanceDaily", `${reportRef.id}_${dateStr}`);
+        batch.set(dailyRef, {
+          reportId: reportRef.id, date: dateStr,
+          studentEmail: reportData.studentEmail, studentName: r.studentName,
+          grade: reportData.grade, cls: reportData.cls,
+          category: r.category, detail: r.detail, reason: r.reason,
+          periods: r.periods, attendanceType: r.attendanceType,
+          createdBy: myStaff.email, createdByName: myStaff.name
+        });
+        opsInBatch++;
       });
 
       if (opsInBatch >= 400) {
         await batch.commit();
         batch = writeBatch(db);
         opsInBatch = 0;
+        btn.textContent = `새 기록 저장 중... ${written}/${parsedRows.length} | Saving... ${written}/${parsedRows.length}`;
       }
-      btn.textContent = `삭제 중... ${deletedReports}/${toDelete.length} | Deleting... ${deletedReports}/${toDelete.length}`;
     }
     if (opsInBatch > 0) await batch.commit();
 
     resultEl.textContent =
-      `중복 정리 완료: attendanceReports ${deletedReports}건, attendanceDaily ${deletedDaily}건 삭제\n` +
-      `Cleanup done: removed ${deletedReports} reports, ${deletedDaily} daily records`;
+      `불러오기 완료: ${written}건 (학생 매칭 ${matched} / 실패 ${unmatched})\n` +
+      `Load done: ${written} rows (matched ${matched} / unmatched ${unmatched})` +
+      (unmatched > 0 ? `\n매칭 실패 | Unmatched: ${[...new Set(unmatchedNames)].join(", ")}` : "");
   } catch (err) {
     console.error(err);
-    resultEl.textContent = "중복 정리 실패 | Cleanup failed: " + err.message;
+    resultEl.textContent = "불러오기 실패 | Load failed: " + err.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = "중복 정리 (Firestore) | Remove Duplicates";
+    btn.textContent = "구글시트에서 불러오기 | Load from Sheet";
+  }
+});
+
+// ----- 구글시트에 저장하기 (앱 → 시트, 시트 전체 교체) -----
+document.getElementById("save-to-sheet-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("save-to-sheet-btn");
+  const resultEl = document.getElementById("sheet-sync-result");
+  if (!SHEET_SYNC_URL) { showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set"); return; }
+  if (!confirm("시트의 기존 내용을 지우고 앱의 현재 출결 데이터 전체로 덮어씁니다. 계속할까요?\nThis clears the sheet and rewrites it with all current attendance data from the app. Continue?")) return;
+
+  btn.disabled = true;
+  btn.textContent = "앱 데이터 조회 중... | Reading app data...";
+  resultEl.textContent = "";
+  try {
+    const snap = await getDocs(collection(db, "attendanceReports"));
+    const all = [];
+    snap.forEach(d => all.push(d.data()));
+    const sorted = sortByStartDate(all);
+    const rows = sorted.map(buildSyncRow);
+
+    btn.textContent = `시트에 쓰는 중... | Writing to sheet...`;
+    const res = await fetch(SHEET_SYNC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, action: "save", rows })
+    });
+    const result = await res.json();
+    if (!result.ok) throw new Error(result.error || "unknown error");
+
+    resultEl.textContent = `저장 완료: ${result.count}건 | Saved ${result.count} rows to sheet`;
+  } catch (err) {
+    console.error(err);
+    resultEl.textContent = "저장 실패 | Save failed: " + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "구글시트에 저장하기 | Save to Sheet";
+  }
+});
+
+// ----- 전체 출결 데이터 삭제 (Firestore만, 시트는 안 건드림) -----
+document.getElementById("delete-all-attendance-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("delete-all-attendance-btn");
+  const resultEl = document.getElementById("delete-all-result");
+  const typed = prompt("정말 전체 삭제하려면 '삭제'를 입력하세요.\nType '삭제' to confirm deleting ALL attendance data.");
+  if (typed !== "삭제") { resultEl.textContent = "취소됨 | Cancelled"; return; }
+
+  btn.disabled = true;
+  btn.textContent = "삭제 중... | Deleting...";
+  resultEl.textContent = "";
+  try {
+    const reportsSnap = await getDocs(collection(db, "attendanceReports"));
+    const reportRefs = [];
+    reportsSnap.forEach(d => reportRefs.push(doc(db, "attendanceReports", d.id)));
+
+    const dailySnap = await getDocs(collection(db, "attendanceDaily"));
+    const dailyRefs = [];
+    dailySnap.forEach(d => dailyRefs.push(doc(db, "attendanceDaily", d.id)));
+
+    const deletedReports = await deleteInChunks(reportRefs, (d, t) => {
+      btn.textContent = `기록 삭제 중... ${d}/${t} | Deleting reports... ${d}/${t}`;
+    });
+    const deletedDaily = await deleteInChunks(dailyRefs, (d, t) => {
+      btn.textContent = `일자기록 삭제 중... ${d}/${t} | Deleting daily... ${d}/${t}`;
+    });
+
+    resultEl.textContent =
+      `전체 삭제 완료: attendanceReports ${deletedReports}건, attendanceDaily ${deletedDaily}건\n` +
+      `Deleted everything: ${deletedReports} reports, ${deletedDaily} daily records`;
+  } catch (err) {
+    console.error(err);
+    resultEl.textContent = "삭제 실패 | Delete failed: " + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "전체 삭제 | Delete Everything";
   }
 });
 
@@ -1133,7 +985,6 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
 
     await batch.commit();
     showToast("저장되었습니다 | Saved");
-    backgroundSyncOne(reportRef.id, reportData); // await 안 함 — 실패해도 저장 자체엔 영향 없음
     resetForm();
   } catch (err) {
     console.error(err);
