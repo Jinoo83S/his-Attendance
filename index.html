@@ -354,8 +354,16 @@
       <div id="view-admin" class="view">
         <div class="card">
           <div class="field">
+            <span class="field-label">동기화 | Sync</span>
+            <p id="last-sync-label" style="font-size:13px;color:var(--text-2);margin-bottom:10px;">확인 중... | Checking...</p>
+            <button class="submit-btn" id="sync-quick-btn" type="button">동기화 | Sync</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="field">
             <div class="summary-row" id="sync-accordion-toggle">
-              <span class="field-label" style="margin-bottom:0;">싱크 | Sync</span>
+              <span class="field-label" style="margin-bottom:0;">구글시트 불러오기 | 동기화 | Load &amp; Sync</span>
               <span class="chevron" id="sync-accordion-chevron">▾</span>
             </div>
             <div id="sync-accordion-content" style="display:none;margin-top:10px;">
@@ -567,6 +575,7 @@ function showView(viewId) {
   if (viewId === "view-recent") loadRecentRecords();
   if (viewId === "view-admin") {
     document.getElementById("admin-year-input").value = CURRENT_YEAR || "";
+    updateLastSyncLabel();
   }
 }
 document.querySelectorAll(".nav-btn").forEach(btn => {
@@ -808,21 +817,21 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
   }
 });
 
-// ----- 구글시트에 저장하기 (앱 → 시트, 시트 전체 교체) -----
-document.getElementById("sync-to-sheet-btn").addEventListener("click", async () => {
-  const btn = document.getElementById("sync-to-sheet-btn");
-  const resultEl = document.getElementById("sheet-sync-result");
+// ----- 동기화 (앱 → 시트, 미동기화분만 추가) — 상단 퀵버튼/아코디언 버튼 공용 -----
+async function performSync(btn, resultEl) {
   if (!SHEET_SYNC_URL) { showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set"); return; }
 
   btn.disabled = true;
+  const origText = btn.textContent;
   btn.textContent = "미동기화 기록 조회 중... | Checking pending records...";
-  resultEl.textContent = "";
+  if (resultEl) resultEl.textContent = "";
   try {
     const snap = await getDocs(query(collection(db, "attendanceReports"), where("synced", "==", false)));
     const pending = [];
     snap.forEach(d => pending.push({ id: d.id, ...d.data() }));
     if (pending.length === 0) {
-      resultEl.textContent = "동기화할 새 기록이 없습니다 | Nothing new to sync";
+      if (resultEl) resultEl.textContent = "동기화할 새 기록이 없습니다 | Nothing new to sync";
+      else showToast("동기화할 새 기록이 없습니다 | Nothing new to sync");
       return;
     }
     const sorted = sortByStartDate(pending);
@@ -837,20 +846,49 @@ document.getElementById("sync-to-sheet-btn").addEventListener("click", async () 
     const result = await res.json();
     if (!result.ok) throw new Error(result.error || "unknown error");
 
+    const now = serverTimestamp();
     const batch = writeBatch(db);
     sorted.forEach(r => {
-      batch.update(doc(db, "attendanceReports", r.id), { synced: true, syncedAt: serverTimestamp() });
+      batch.update(doc(db, "attendanceReports", r.id), { synced: true, syncedAt: now });
     });
+    batch.set(doc(db, "settings", "general"), { lastSyncAt: now, lastSyncCount: result.count }, { merge: true });
     await batch.commit();
 
-    resultEl.textContent = `동기화 완료: ${result.count}건 시트에 추가됨 | Synced ${result.count} new rows to sheet`;
+    const msg = `동기화 완료: ${result.count}건 시트에 추가됨 | Synced ${result.count} new rows to sheet`;
+    if (resultEl) resultEl.textContent = msg; else showToast(msg);
+    updateLastSyncLabel();
   } catch (err) {
     console.error(err);
-    resultEl.textContent = "저장 실패 | Save failed: " + err.message;
+    const msg = "동기화 실패 | Sync failed: " + err.message;
+    if (resultEl) resultEl.textContent = msg; else showToast(msg);
   } finally {
     btn.disabled = false;
-    btn.textContent = "동기화 | Sync";
+    btn.textContent = origText;
   }
+}
+
+async function updateLastSyncLabel() {
+  const labelEl = document.getElementById("last-sync-label");
+  try {
+    const snap = await getDoc(doc(db, "settings", "general"));
+    const data = snap.exists() ? snap.data() : {};
+    if (data.lastSyncAt) {
+      const d = data.lastSyncAt.toDate ? data.lastSyncAt.toDate() : new Date(data.lastSyncAt);
+      const formatted = d.toLocaleString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+      labelEl.textContent = `마지막 동기화: ${formatted} (${data.lastSyncCount ?? "?"}건) | Last synced: ${formatted}`;
+    } else {
+      labelEl.textContent = "아직 동기화한 적 없음 | Never synced yet";
+    }
+  } catch (err) {
+    labelEl.textContent = "동기화 상태 확인 실패 | Failed to check sync status";
+  }
+}
+
+document.getElementById("sync-quick-btn").addEventListener("click", () => {
+  performSync(document.getElementById("sync-quick-btn"), null);
+});
+document.getElementById("sync-to-sheet-btn").addEventListener("click", () => {
+  performSync(document.getElementById("sync-to-sheet-btn"), document.getElementById("sheet-sync-result"));
 });
 
 // ----- 전체 출결 데이터 삭제 (Firestore만, 시트는 안 건드림) -----
