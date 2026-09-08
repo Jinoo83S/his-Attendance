@@ -322,6 +322,19 @@
             <button class="submit-btn" id="sync-now-btn" type="button">지금 동기화 | Sync Now</button>
           </div>
         </div>
+
+        <div class="card">
+          <div class="field">
+            <span class="field-label">과거 기록 가져오기 | Import Historical Records</span>
+            <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;line-height:1.5;">
+              기존 시트에서 헤더 포함 복사 후 붙여넣기(Start Date, End Date, 학년, 반, 담임, 이름, Name, 분류, 상세, Reason/사유, 출결구분, 교시선택).<br>
+              Paste rows copied from the old sheet, including the header row. 한 번만 실행하세요 — 중복 방지 기능 없음 | Run once — no duplicate check.
+            </p>
+            <textarea id="legacy-import-textarea" style="min-height:120px;font-family:monospace;font-size:12px;" placeholder="여기에 붙여넣기 | Paste here"></textarea>
+            <button class="submit-btn" id="legacy-import-btn" type="button" style="margin-top:10px;">가져오기 | Import</button>
+            <div id="legacy-import-result" style="font-size:13px;margin-top:10px;white-space:pre-line;"></div>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -364,9 +377,9 @@ const firebaseConfig = {
 const ALLOWED_DOMAIN = "his.sc.kr";
 let CURRENT_YEAR = null; // settings/general.currentYear 에서 로드 (his-main 전체와 동일 기준)
 
-// TODO: Apps Script 배포 후 아래 두 값을 채우세요 (sheet-sync-apps-script.gs 참고)
-const SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbxDpd3AQMa7uvSPO5ebUS24sMrkvxR9_L4gMMqxPvvvH54eqW97ELFL6JRmspnrG1Hc/exec"; // 예: "https://script.google.com/macros/s/AKfycb.../exec"
-const SHEET_SYNC_TOKEN = "his_attendance_token"; // gs 파일의 SECRET_TOKEN과 동일한 값
+// Apps Script 배포 완료 — sheet-sync-apps-script.gs 참고
+const SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbxDpd3AQMa7uvSPO5ebUS24sMrkvxR9_L4gMMqxPvvvH54eqW97ELFL6JRmspnrG1Hc/exec";
+const SHEET_SYNC_TOKEN = "his_attendance_token";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -606,7 +619,133 @@ document.getElementById("sync-now-btn").addEventListener("click", async () => {
   }
 });
 
-// ===== 학생 로스터 로드 + 검색 =====
+// ===== 과거 기록 일괄 가져오기 (기존 시트 붙여넣기 → Firestore) =====
+function shortLabel(raw) {
+  if (!raw) return "";
+  return raw.split("|")[0].replace(/\s+/g, "").trim();
+}
+
+function parseLegacyPaste(text) {
+  const lines = text.trim().split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length < 2) throw new Error("헤더 + 데이터 최소 2줄 필요 | Need header + at least 1 data row");
+  const headers = lines[0].split("\t").map(h => h.trim());
+  const idx = {};
+  headers.forEach((h, i) => { idx[h] = i; });
+  const c = (name) => (idx[name] !== undefined ? idx[name] : -1);
+  const col = {
+    start: c("Start Date"), end: c("End Date"), grade: c("학년"), cls: c("반"),
+    homeroom: c("담임"), name: c("이름"), engName: c("Name"), category: c("분류"),
+    detail: c("상세"), reasonEn: c("Reason"), reasonKo: c("사유"), attType: c("출결구분"),
+    periods: c("교시선택")
+  };
+  if (col.start < 0 || col.end < 0 || col.name < 0) {
+    throw new Error("필수 헤더(Start Date/End Date/이름)를 찾을 수 없습니다 | Missing required headers");
+  }
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split("\t");
+    const get = (idx2) => (idx2 >= 0 ? (cells[idx2] || "").trim() : "");
+    const startDate = get(col.start);
+    const endDate = get(col.end) || startDate;
+    if (!startDate || !get(col.name)) continue; // 빈 줄 스킵
+    const categoryShort = shortLabel(get(col.category));
+    const detailShort = shortLabel(get(col.detail));
+    const periodsRaw = get(col.periods);
+    rows.push({
+      startDate, endDate,
+      grade: get(col.grade), cls: get(col.cls),
+      legacyHomeroom: get(col.homeroom),
+      studentName: get(col.name), studentEngName: get(col.engName),
+      category: categoryShort, detail: detailShort,
+      reason: get(col.reasonKo) || get(col.reasonEn),
+      attendanceType: (detailShort && categoryShort) ? (detailShort + categoryShort) : get(col.attType),
+      periods: periodsRaw ? periodsRaw.split(",").map(p => p.trim()).filter(Boolean) : []
+    });
+  }
+  return rows;
+}
+
+document.getElementById("legacy-import-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("legacy-import-btn");
+  const resultEl = document.getElementById("legacy-import-result");
+  const text = document.getElementById("legacy-import-textarea").value;
+
+  let rows;
+  try {
+    rows = parseLegacyPaste(text);
+  } catch (err) {
+    resultEl.textContent = "파싱 실패 | Parse failed: " + err.message;
+    return;
+  }
+  if (rows.length === 0) {
+    resultEl.textContent = "가져올 행이 없습니다 | No rows to import";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "가져오는 중... | Importing...";
+  resultEl.textContent = "";
+
+  let matched = 0, unmatched = 0, opsInBatch = 0;
+  const unmatchedNames = [];
+  let batch = writeBatch(db);
+
+  for (const r of rows) {
+    const student = studentRoster.find(s =>
+      s.name === r.studentName && (!r.grade || s.grade === r.grade) && (!r.cls || s.cls === r.cls)
+    ) || studentRoster.find(s => s.name === r.studentName);
+
+    if (student) matched++; else { unmatched++; unmatchedNames.push(r.studentName); }
+
+    const reportRef = doc(collection(db, "attendanceReports"));
+    const reportData = {
+      studentEmail: student ? student.email : "",
+      studentName: r.studentName,
+      studentEngName: r.studentEngName || (student ? student.engName : ""),
+      grade: r.grade || (student ? student.grade : ""),
+      cls: r.cls || (student ? student.cls : ""),
+      startDate: r.startDate, endDate: r.endDate,
+      category: r.category, detail: r.detail, reason: r.reason,
+      periods: r.periods, attendanceType: r.attendanceType,
+      legacyHomeroom: r.legacyHomeroom || "",
+      createdBy: myStaff.email, createdByName: myStaff.name,
+      createdAt: serverTimestamp(),
+      synced: true, syncedAt: null, // 이미 기존 시트에 있는 데이터이므로 재동기화 대상 아님
+      importedFromLegacy: true
+    };
+    batch.set(reportRef, reportData);
+    opsInBatch++;
+
+    dateRange(r.startDate, r.endDate).forEach(dateStr => {
+      const dailyRef = doc(db, "attendanceDaily", `${reportRef.id}_${dateStr}`);
+      batch.set(dailyRef, {
+        reportId: reportRef.id, date: dateStr,
+        studentEmail: reportData.studentEmail, studentName: r.studentName,
+        grade: reportData.grade, cls: reportData.cls,
+        category: r.category, detail: r.detail, reason: r.reason,
+        periods: r.periods, attendanceType: r.attendanceType,
+        createdBy: myStaff.email, createdByName: myStaff.name
+      });
+      opsInBatch++;
+    });
+
+    if (opsInBatch >= 400) {
+      await batch.commit();
+      batch = writeBatch(db);
+      opsInBatch = 0;
+    }
+  }
+  if (opsInBatch > 0) await batch.commit();
+
+  resultEl.textContent =
+    `완료: ${rows.length}건 처리 (학생 매칭 ${matched} / 실패 ${unmatched})\n` +
+    `Done: ${rows.length} rows (matched ${matched} / unmatched ${unmatched})` +
+    (unmatched > 0 ? `\n매칭 실패 | Unmatched: ${[...new Set(unmatchedNames)].join(", ")}` : "");
+
+  btn.disabled = false;
+  btn.textContent = "가져오기 | Import";
+});
 async function loadStudentRoster() {
   studentRoster = [];
   const q = query(collection(db, "studentRecords"), where("year", "==", CURRENT_YEAR));
