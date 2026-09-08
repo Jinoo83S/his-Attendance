@@ -308,6 +308,14 @@
             </a>
           </div>
         </div>
+
+        <div class="card">
+          <div class="field">
+            <span class="field-label">구글시트 동기화 | Sheet Sync</span>
+            <p id="sync-status-text" style="font-size:13px;margin-bottom:10px;">확인 중... | Checking...</p>
+            <button class="submit-btn" id="sync-now-btn" type="button">지금 동기화 | Sync Now</button>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -349,6 +357,10 @@ const firebaseConfig = {
 };
 const ALLOWED_DOMAIN = "his.sc.kr";
 let CURRENT_YEAR = null; // settings/general.currentYear 에서 로드 (his-main 전체와 동일 기준)
+
+// TODO: Apps Script 배포 후 아래 두 값을 채우세요 (sheet-sync-apps-script.gs 참고)
+const SHEET_SYNC_URL = ""; // 예: "https://script.google.com/macros/s/AKfycb.../exec"
+const SHEET_SYNC_TOKEN = ""; // gs 파일의 SECRET_TOKEN과 동일한 값
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -449,7 +461,10 @@ function showView(viewId) {
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.view === viewId));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === viewId));
   if (viewId === "view-recent") loadRecentRecords();
-  if (viewId === "view-admin") document.getElementById("admin-year-input").value = CURRENT_YEAR || "";
+  if (viewId === "view-admin") {
+    document.getElementById("admin-year-input").value = CURRENT_YEAR || "";
+    updateSyncStatus();
+  }
 }
 document.querySelectorAll(".nav-btn").forEach(btn => {
   btn.addEventListener("click", () => showView(btn.dataset.view));
@@ -467,6 +482,105 @@ document.getElementById("admin-year-save-btn").addEventListener("click", async (
   } catch (err) {
     console.error(err);
     showToast("저장 실패 | Save failed: " + err.message);
+  }
+});
+
+// ===== 구글시트 동기화 =====
+function formatDotDate(iso) {
+  // "2026-03-03" -> "2026.03.03."
+  const [y, m, d] = iso.split("-");
+  return `${y}.${m}.${d}.`;
+}
+function buildSyncRow(r) {
+  const dates = dateRange(r.startDate, r.endDate);
+  const endPlus1 = new Date(r.endDate + "T00:00:00");
+  endPlus1.setDate(endPlus1.getDate() + 1);
+  const endPlus1Str = endPlus1.toISOString().slice(0, 10);
+
+  const row = [
+    r.startDate,                          // Start Date
+    r.endDate,                            // End Date
+    endPlus1Str,                          // End Date+1
+    r.grade,                              // 학년
+    r.cls,                                // 반
+    "",                                   // 담임 (미구현 — 백로그)
+    r.studentName,                        // 이름
+    r.studentEngName || "",               // Name
+    r.category,                           // 분류
+    r.detail,                             // 상세
+    r.reason,                             // Reason
+    r.attendanceType,                     // 출결구분
+    r.reason,                             // 사유
+    (r.periods || []).join(" , "),        // 교시선택
+    "",                                   // 서류 (미구현 — 백로그)
+    formatDotDate(r.startDate),           // 시작일자
+    formatDotDate(r.endDate),             // 끝일자
+    String(dates.length),                 // 날짜확인
+  ];
+  dates.forEach(d => row.push(formatDotDate(d))); // 날짜1, 날짜2, ...
+  return row;
+}
+
+async function getUnsyncedReports() {
+  const q = query(collection(db, "attendanceReports"), where("synced", "==", false));
+  const snap = await getDocs(q);
+  const list = [];
+  snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+  return list;
+}
+
+async function updateSyncStatus() {
+  const statusEl = document.getElementById("sync-status-text");
+  if (!SHEET_SYNC_URL) {
+    statusEl.textContent = "Apps Script URL 미설정 — index.html의 SHEET_SYNC_URL을 채워주세요 | Apps Script URL not configured";
+    document.getElementById("sync-now-btn").disabled = true;
+    return;
+  }
+  try {
+    const unsynced = await getUnsyncedReports();
+    statusEl.textContent = `동기화 대기 중: ${unsynced.length}건 | Pending sync: ${unsynced.length}`;
+  } catch (err) {
+    statusEl.textContent = "상태 확인 실패 | Failed to check: " + err.message;
+  }
+}
+
+document.getElementById("sync-now-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("sync-now-btn");
+  if (!SHEET_SYNC_URL) {
+    showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set");
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "동기화 중... | Syncing...";
+  try {
+    const unsynced = await getUnsyncedReports();
+    if (unsynced.length === 0) {
+      showToast("동기화할 기록이 없습니다 | Nothing to sync");
+      return;
+    }
+    const rows = unsynced.map(buildSyncRow);
+    const res = await fetch(SHEET_SYNC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" }, // Apps Script CORS 우회용 (application/json 대신)
+      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, rows })
+    });
+    const result = await res.json();
+    if (!result.ok) throw new Error(result.error || "unknown error");
+
+    const batch = writeBatch(db);
+    unsynced.forEach(r => {
+      batch.update(doc(db, "attendanceReports", r.id), { synced: true, syncedAt: serverTimestamp() });
+    });
+    await batch.commit();
+
+    showToast(`${result.count}건 동기화 완료 | Synced ${result.count} records`);
+    await updateSyncStatus();
+  } catch (err) {
+    console.error(err);
+    showToast("동기화 실패 | Sync failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "지금 동기화 | Sync Now";
   }
 });
 
@@ -656,6 +770,7 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
     const reportData = {
       studentEmail: selectedStudent.email,
       studentName: selectedStudent.name,
+      studentEngName: selectedStudent.engName || "",
       grade: selectedStudent.grade,
       cls: selectedStudent.cls,
       startDate, endDate,
