@@ -519,12 +519,16 @@ resultsEl.addEventListener("click", (e) => {
 function populateFilterChips() {
   const grades = [...new Set(studentRoster.map(s => s.grade).filter(g => g !== ""))]
     .sort((a, b) => Number(a) - Number(b));
-  const clsValues = [...new Set(studentRoster.map(s => s.cls).filter(c => c !== ""))].sort();
-
   document.getElementById("grade-filter-group").innerHTML = grades
-    .map(g => `<div class="chip" data-grade="${g}">${g}학년 | Grade ${g}</div>`).join("");
-  document.getElementById("cls-filter-group").innerHTML = clsValues
-    .map(c => `<div class="chip" data-cls="${c}">${c}반 | Class ${c}</div>`).join("");
+    .map(g => `<div class="chip" data-grade="${g}">${g}</div>`).join("");
+  document.getElementById("cls-filter-group").innerHTML = "";
+}
+function updateClsChipsForGrade(grade) {
+  const clsGroupEl = document.getElementById("cls-filter-group");
+  filterCls = null;
+  if (!grade) { clsGroupEl.innerHTML = ""; return; }
+  const clsValues = [...new Set(studentRoster.filter(s => s.grade === grade).map(s => s.cls).filter(c => c !== ""))].sort();
+  clsGroupEl.innerHTML = clsValues.map(c => `<div class="chip" data-cls="${c}">${c}</div>`).join("");
 }
 document.getElementById("grade-filter-group").addEventListener("click", (e) => {
   const chip = e.target.closest(".chip");
@@ -533,6 +537,7 @@ document.getElementById("grade-filter-group").addEventListener("click", (e) => {
   document.querySelectorAll("#grade-filter-group .chip").forEach(c => c.classList.remove("selected"));
   filterGrade = already ? null : chip.dataset.grade;
   if (!already) chip.classList.add("selected");
+  updateClsChipsForGrade(filterGrade);
   updateStudentResults();
 });
 document.getElementById("cls-filter-group").addEventListener("click", (e) => {
@@ -700,6 +705,7 @@ function resetForm() {
   document.getElementById("selected-student-box").style.display = "none";
   document.getElementById("student-picker").style.display = "block";
   document.querySelectorAll(".chip").forEach(c => c.classList.remove("selected"));
+  document.getElementById("cls-filter-group").innerHTML = "";
   searchInput.value = "";
   resultsEl.innerHTML = "";
   document.getElementById("periods-field").style.display = "none";
