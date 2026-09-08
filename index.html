@@ -826,6 +826,27 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
 });
 
 // ----- 동기화 (앱 → 시트, 미동기화분만 추가) — 상단 퀵버튼/아코디언 버튼 공용 -----
+// ----- 출결 저장 직후 자동으로 그 건 하나만 조용히 시트에 반영 (일반 사용자에겐 아무 표시 안 함) -----
+async function backgroundSyncOne(reportId, reportData) {
+  if (!SHEET_SYNC_URL) return;
+  try {
+    const row = buildSyncRow(reportData);
+    const res = await fetch(SHEET_SYNC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, action: "append", rows: [row] })
+    });
+    const result = await res.json();
+    if (!result.ok) throw new Error(result.error || "unknown error");
+    await setDoc(doc(db, "attendanceReports", reportId), { synced: true, syncedAt: serverTimestamp() }, { merge: true });
+    // settings 쓰기는 관리자만 가능 — lastSyncAt은 관리자가 수동 동기화할 때만 기록됨
+  } catch (err) {
+    // 실패해도 조용히 넘어감 — synced:false로 남아서 관리자 화면 "동기화 대기 중" 목록에 잡히고,
+    // 수동 "동기화" 버튼으로 나중에 다시 시도됨
+    console.warn("백그라운드 동기화 실패 (나중에 관리자 수동 동기화로 재시도됨):", err);
+  }
+}
+
 async function performSync(btn, resultEl) {
   if (!SHEET_SYNC_URL) { showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set"); return; }
 
@@ -1186,6 +1207,7 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
 
     await batch.commit();
     showToast("저장되었습니다 | Saved");
+    backgroundSyncOne(reportRef.id, reportData); // await 안 함 — 조용히 시도, 실패해도 저장엔 영향 없음
     resetForm();
   } catch (err) {
     console.error(err);
