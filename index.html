@@ -72,11 +72,15 @@
     display:flex; align-items:center; justify-content:space-between; flex-shrink:0; gap:8px;
   }
   #topbar .title{ font-size:14px; font-weight:700; letter-spacing:-.2px; white-space:nowrap; }
-  #topbar .user{ display:flex; align-items:center; gap:8px; font-size:12px; flex-shrink:0; }
-  #topbar .user-name{ font-weight:500; max-width:88px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #topbar .user{ display:flex; align-items:center; gap:6px; font-size:12px; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end; }
+  #topbar .user-name{ font-weight:500; max-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #logout-btn{
     background:rgba(255,255,255,.18); border:none; color:#fff; border-radius:14px;
     padding:6px 10px; font-size:11px; cursor:pointer; white-space:nowrap;
+  }
+  #admin-btn{
+    background:rgba(255,255,255,.32); border:none; color:#fff; border-radius:14px;
+    padding:6px 10px; font-size:11px; cursor:pointer; white-space:nowrap; font-weight:700;
   }
 
   /* ===== 콘텐츠 ===== */
@@ -199,6 +203,7 @@
     <div id="topbar">
       <div class="title">HIS 출결체크 | Attendance</div>
       <div class="user">
+        <button id="admin-btn" style="display:none;" title="관리자 설정 | Admin Settings">⚙ 관리자 | Admin</button>
         <span class="user-name" id="user-name"></span>
         <button id="logout-btn">로그아웃 | Log Out</button>
       </div>
@@ -274,6 +279,36 @@
         <div id="recent-list"></div>
       </div>
 
+      <!-- 관리자 화면 -->
+      <div id="view-admin" class="view">
+        <div class="card">
+          <div class="field">
+            <span class="field-label">현재 학년도 | Current Year</span>
+            <div class="date-row">
+              <input type="text" id="admin-year-input" placeholder="예 | e.g. 2026" style="max-width:140px;">
+              <button class="clear-student" id="admin-year-save-btn">저장 | Save</button>
+            </div>
+            <p style="font-size:12px;color:var(--text-2);margin-top:8px;line-height:1.5;">
+              his-main 전체(학생명단·출결 등)가 공유하는 값입니다.<br>
+              Shared across all of his-main (student roster, attendance, etc).
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="field">
+            <span class="field-label">학생 명단 관리 | Student Roster Admin</span>
+            <p style="font-size:13px;margin-bottom:10px;">
+              학생 조회/수정/일괄등록은 his-main 관리자 화면에서 진행합니다.<br>
+              View, edit, and bulk-import students in the his-main admin page.
+            </p>
+            <a href="https://his-main.web.app/admin-students.html" target="_blank" rel="noopener" style="text-decoration:none;">
+              <button class="submit-btn" type="button">admin-students.html 열기 | Open</button>
+            </a>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <div id="bottomnav">
@@ -297,7 +332,7 @@ import {
   getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, collection, query, where, orderBy, limit,
+  getFirestore, doc, getDoc, setDoc, collection, query, where, orderBy, limit,
   getDocs, writeBatch, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
@@ -385,9 +420,13 @@ onAuthStateChanged(auth, async (user) => {
   const sd = staffSnap.data();
   myStaff = {
     email: user.email,
-    name: sd.displayName || sd.nameKo || sd.nameEn || user.email.split("@")[0]
+    name: sd.displayName || sd.nameKo || sd.nameEn || user.email.split("@")[0],
+    role: sd.role || ""
   };
   document.getElementById("user-name").textContent = myStaff.name;
+  if (myStaff.role === "admin") {
+    document.getElementById("admin-btn").style.display = "inline-block";
+  }
 
   appWrapEl.classList.add("active");
   initTodayDates();
@@ -395,22 +434,39 @@ onAuthStateChanged(auth, async (user) => {
   const settingsSnap = await getDoc(doc(db, "settings", "general"));
   CURRENT_YEAR = settingsSnap.exists() ? (settingsSnap.data().currentYear || "") : "";
   if (!CURRENT_YEAR) {
-    showToast("현재 학년도가 설정되지 않았습니다 | Current year is not set (admin.html)");
+    showToast(myStaff.role === "admin"
+      ? "현재 학년도 미설정 — 관리자 버튼에서 설정하세요 | Year not set — set it via the Admin button"
+      : "현재 학년도가 설정되지 않았습니다 | Current year is not set");
   }
 
   await loadStudentRoster();
   loadRecentRecords();
 });
 
-// ===== 하단 내비 =====
+// ===== 화면 전환 (하단 내비 + 관리자 버튼 공용) =====
+function showView(viewId) {
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.view === viewId));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === viewId));
+  if (viewId === "view-recent") loadRecentRecords();
+  if (viewId === "view-admin") document.getElementById("admin-year-input").value = CURRENT_YEAR || "";
+}
 document.querySelectorAll(".nav-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
-    document.getElementById(btn.dataset.view).classList.add("active");
-    if (btn.dataset.view === "view-recent") loadRecentRecords();
-  });
+  btn.addEventListener("click", () => showView(btn.dataset.view));
+});
+document.getElementById("admin-btn").addEventListener("click", () => showView("view-admin"));
+
+document.getElementById("admin-year-save-btn").addEventListener("click", async () => {
+  const val = document.getElementById("admin-year-input").value.trim();
+  if (!val) return;
+  try {
+    await setDoc(doc(db, "settings", "general"), { currentYear: val }, { merge: true });
+    CURRENT_YEAR = val;
+    showToast("학년도 저장됨 | Year saved: " + val);
+    await loadStudentRoster();
+  } catch (err) {
+    console.error(err);
+    showToast("저장 실패 | Save failed: " + err.message);
+  }
 });
 
 // ===== 학생 로스터 로드 + 검색 =====
