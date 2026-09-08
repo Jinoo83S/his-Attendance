@@ -362,6 +362,7 @@
             <span class="field-label">동기화 | Sync</span>
             <p id="last-sync-label" style="font-size:13px;color:var(--text-2);margin-bottom:10px;">확인 중... | Checking...</p>
             <button class="submit-btn" id="sync-quick-btn" type="button">동기화 | Sync</button>
+            <div id="pending-sync-list" style="margin-top:12px;"></div>
           </div>
         </div>
 
@@ -888,6 +889,30 @@ async function updateLastSyncLabel() {
     }
   } catch (err) {
     labelEl.textContent = "동기화 상태 확인 실패 | Failed to check sync status";
+  }
+  updatePendingSyncList();
+}
+
+async function updatePendingSyncList() {
+  const listEl = document.getElementById("pending-sync-list");
+  listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">확인 중... | Checking...</div>`;
+  try {
+    const snap = await getDocs(query(collection(db, "attendanceReports"), where("synced", "==", false)));
+    const pending = [];
+    snap.forEach(d => pending.push(d.data()));
+    if (pending.length === 0) {
+      listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">동기화 대기 중인 기록 없음 | Nothing pending</div>`;
+      return;
+    }
+    const sorted = sortByStartDate(pending);
+    listEl.innerHTML = `<div class="field-label" style="margin-bottom:8px;">동기화 대기 중 ${pending.length}건 | ${pending.length} pending</div>`;
+    sorted.forEach(r => {
+      const dateLabel = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
+      listEl.appendChild(buildRecordCardEl(r, dateLabel));
+    });
+  } catch (err) {
+    console.error(err);
+    listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">확인 실패 | Failed to check: ${err.message}</div>`;
   }
 }
 
