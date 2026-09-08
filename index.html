@@ -35,16 +35,17 @@
   #shell{
     max-width:var(--shell-max);
     margin:0 auto;
-    min-height:100vh;
+    height:100vh;
     background:var(--bg);
     display:flex;
     flex-direction:column;
     box-shadow:0 0 40px rgba(0,0,0,.15);
     position:relative;
+    overflow:hidden;
   }
   @media (min-width:560px){
     body{ padding:24px 0; }
-    #shell{ min-height:calc(100vh - 48px); border-radius:16px; overflow:hidden; }
+    #shell{ height:calc(100vh - 48px); border-radius:16px; }
   }
 
   /* ===== 로그인 / 접근거부 게이트 ===== */
@@ -85,7 +86,7 @@
   }
 
   /* ===== 콘텐츠 ===== */
-  #content{ flex:1; overflow-y:auto; padding:16px 16px 90px; }
+  #content{ flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:16px 16px 90px; }
   .view{ display:none; }
   .view.active{ display:block; }
 
@@ -239,8 +240,14 @@
 
     <div id="content">
 
+      <!-- 오늘 화면 (첫 화면) -->
+      <div id="view-today" class="view active">
+        <div class="field-label" style="margin-bottom:10px;" id="today-date-label"></div>
+        <div id="today-list"></div>
+      </div>
+
       <!-- 입력 화면 -->
-      <div id="view-input" class="view active">
+      <div id="view-input" class="view">
         <div class="card">
           <div class="field">
             <span class="field-label">학생 | Student</span>
@@ -413,7 +420,11 @@
     </div>
 
     <div id="bottomnav">
-      <button class="nav-btn active" data-view="view-input">
+      <button class="nav-btn active" data-view="view-today">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.2"/><path d="M12 7v5l3 3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        오늘 | Today
+      </button>
+      <button class="nav-btn" data-view="view-input">
         <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
         입력 | Input
       </button>
@@ -545,13 +556,14 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   await loadStudentRoster();
-  loadRecentRecords();
+  loadTodayList();
 });
 
 // ===== 화면 전환 (하단 내비 + 관리자 버튼 공용) =====
 function showView(viewId) {
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.view === viewId));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === viewId));
+  if (viewId === "view-today") loadTodayList();
   if (viewId === "view-recent") loadRecentRecords();
   if (viewId === "view-admin") {
     document.getElementById("admin-year-input").value = CURRENT_YEAR || "";
@@ -1171,6 +1183,30 @@ function buildRecordCardEl(r, dateLabel) {
   `;
   card.querySelector(".summary-row").addEventListener("click", () => card.classList.toggle("expanded"));
   return card;
+}
+
+// ===== 오늘 화면 (학교 전체 — 본인 것만이 아님) =====
+async function loadTodayList() {
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById("today-date-label").textContent = `오늘 (${today}) | Today`;
+  const listEl = document.getElementById("today-list");
+  listEl.innerHTML = `<div class="empty-msg">불러오는 중... | Loading...</div>`;
+  try {
+    const snap = await getDocs(query(collection(db, "attendanceDaily"), where("date", "==", today)));
+    const items = [];
+    snap.forEach(d => items.push(d.data()));
+    items.sort((a, b) => `${a.grade}${a.cls}`.localeCompare(`${b.grade}${b.cls}`) || a.studentName.localeCompare(b.studentName));
+
+    if (items.length === 0) {
+      listEl.innerHTML = `<div class="empty-msg">오늘 등록된 출결이 없습니다 | No attendance recorded today</div>`;
+      return;
+    }
+    listEl.innerHTML = "";
+    items.forEach(r => listEl.appendChild(buildRecordCardEl(r, today)));
+  } catch (err) {
+    console.error(err);
+    listEl.innerHTML = `<div class="empty-msg">불러오기 실패 | Failed to load: ${err.message}</div>`;
+  }
 }
 
 async function fetchRecentData() {
