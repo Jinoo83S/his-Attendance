@@ -541,12 +541,16 @@ function buildSyncRow(r) {
   return row;
 }
 
+function sortByStartDate(list) {
+  return [...list].sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
+}
+
 async function getUnsyncedReports() {
   const q = query(collection(db, "attendanceReports"), where("synced", "==", false));
   const snap = await getDocs(q);
   const list = [];
   snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-  return list;
+  return sortByStartDate(list);
 }
 
 // 공용 동기화 실행기: 수동 배치 버튼과 제출 직후 백그라운드 자동 동기화가 함께 사용
@@ -757,7 +761,7 @@ document.getElementById("legacy-import-btn").addEventListener("click", async () 
   let syncedCount = 0, syncError = "";
   if (SHEET_SYNC_URL) {
     try {
-      syncedCount = await syncInChunks(importedForSync, (done, total) => {
+      syncedCount = await syncInChunks(sortByStartDate(importedForSync), (done, total) => {
         btn.textContent = `시트 동기화 중... ${done}/${total} | Syncing... ${done}/${total}`;
       });
     } catch (err) {
@@ -804,12 +808,13 @@ document.getElementById("resync-imported-btn").addEventListener("click", async (
     const snap = await getDocs(q);
     const all = [];
     snap.forEach(d => all.push({ id: d.id, ...d.data() }));
-    if (all.length === 0) {
+    const sortedAll = sortByStartDate(all);
+    if (sortedAll.length === 0) {
       resultEl.textContent = "가져온 기록이 없습니다 | No imported records found";
       return;
     }
-    btn.textContent = `동기화 중... 0/${all.length} | Syncing... 0/${all.length}`;
-    const done = await syncInChunks(all, (d, total) => {
+    btn.textContent = `동기화 중... 0/${sortedAll.length} | Syncing... 0/${sortedAll.length}`;
+    const done = await syncInChunks(sortedAll, (d, total) => {
       btn.textContent = `동기화 중... ${d}/${total} | Syncing... ${d}/${total}`;
     });
     resultEl.textContent = `과거 가져오기 기록 재동기화 완료: ${done}건 | Resynced ${done} imported records`;
