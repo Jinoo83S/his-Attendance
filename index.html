@@ -151,11 +151,17 @@
     background:#fff; border-radius:8px; padding:12px 14px; margin-bottom:10px;
     border-left:5px solid var(--text-2); box-shadow:0 1px 2px rgba(0,0,0,.06);
   }
-  .record-card .top-row{ display:flex; justify-content:space-between; align-items:baseline; }
+  .record-card .summary-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:pointer; }
+  .record-card .summary-text{ font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .record-card .student-name{ font-weight:700; font-size:15px; }
+  .record-card .sub-inline{ color:var(--text-2); font-size:12px; }
   .record-card .type-badge{ font-size:12px; font-weight:700; }
-  .record-card .meta{ font-size:12px; color:var(--text-2); margin-top:4px; }
-  .record-card .reason{ font-size:13px; color:var(--text); margin-top:6px; }
+  .record-card .chevron{ color:var(--text-2); font-size:12px; flex-shrink:0; transition:transform .15s; }
+  .record-card.expanded .chevron{ transform:rotate(180deg); }
+  .record-card .record-detail{ display:none; margin-top:8px; padding-top:8px; border-top:1px solid #F1F1F1; }
+  .record-card.expanded .record-detail{ display:block; }
+  .record-card .meta{ font-size:12px; color:var(--text-2); margin-bottom:4px; }
+  .record-card .reason{ font-size:13px; color:var(--text); }
   .empty-msg{ text-align:center; color:var(--text-2); font-size:13px; padding:30px 10px; }
 
   /* ===== 하단 내비 ===== */
@@ -359,8 +365,8 @@ const ALLOWED_DOMAIN = "his.sc.kr";
 let CURRENT_YEAR = null; // settings/general.currentYear 에서 로드 (his-main 전체와 동일 기준)
 
 // TODO: Apps Script 배포 후 아래 두 값을 채우세요 (sheet-sync-apps-script.gs 참고)
-const SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbxDpd3AQMa7uvSPO5ebUS24sMrkvxR9_L4gMMqxPvvvH54eqW97ELFL6JRmspnrG1Hc/exec"; // 예: "https://script.google.com/macros/s/AKfycb.../exec"
-const SHEET_SYNC_TOKEN = "his_attendance_token"; // gs 파일의 SECRET_TOKEN과 동일한 값
+const SHEET_SYNC_URL = ""; // 예: "https://script.google.com/macros/s/AKfycb.../exec"
+const SHEET_SYNC_TOKEN = ""; // gs 파일의 SECRET_TOKEN과 동일한 값
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -529,6 +535,36 @@ async function getUnsyncedReports() {
   return list;
 }
 
+// 공용 동기화 실행기: 수동 배치 버튼과 제출 직후 백그라운드 자동 동기화가 함께 사용
+async function syncReports(reportsWithId) {
+  if (!SHEET_SYNC_URL || reportsWithId.length === 0) return { ok: true, count: 0 };
+  const rows = reportsWithId.map(buildSyncRow);
+  const res = await fetch(SHEET_SYNC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" }, // Apps Script CORS 우회용 (application/json 대신)
+    body: JSON.stringify({ token: SHEET_SYNC_TOKEN, rows })
+  });
+  const result = await res.json();
+  if (!result.ok) throw new Error(result.error || "unknown error");
+
+  const batch = writeBatch(db);
+  reportsWithId.forEach(r => {
+    batch.update(doc(db, "attendanceReports", r.id), { synced: true, syncedAt: serverTimestamp() });
+  });
+  await batch.commit();
+  return result;
+}
+
+// 출결 저장 직후 자동 호출 — 실패해도 조용히 무시 (synced:false로 남아 관리자 수동 동기화로 나중에 처리됨)
+async function backgroundSyncOne(reportId, reportData) {
+  if (!SHEET_SYNC_URL) return;
+  try {
+    await syncReports([{ id: reportId, ...reportData }]);
+  } catch (err) {
+    console.warn("백그라운드 동기화 실패(나중에 관리자 수동 동기화로 재시도됨):", err);
+  }
+}
+
 async function updateSyncStatus() {
   const statusEl = document.getElementById("sync-status-text");
   if (!SHEET_SYNC_URL) {
@@ -558,21 +594,7 @@ document.getElementById("sync-now-btn").addEventListener("click", async () => {
       showToast("동기화할 기록이 없습니다 | Nothing to sync");
       return;
     }
-    const rows = unsynced.map(buildSyncRow);
-    const res = await fetch(SHEET_SYNC_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" }, // Apps Script CORS 우회용 (application/json 대신)
-      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, rows })
-    });
-    const result = await res.json();
-    if (!result.ok) throw new Error(result.error || "unknown error");
-
-    const batch = writeBatch(db);
-    unsynced.forEach(r => {
-      batch.update(doc(db, "attendanceReports", r.id), { synced: true, syncedAt: serverTimestamp() });
-    });
-    await batch.commit();
-
+    const result = await syncReports(unsynced);
     showToast(`${result.count}건 동기화 완료 | Synced ${result.count} records`);
     await updateSyncStatus();
   } catch (err) {
@@ -801,6 +823,7 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
 
     await batch.commit();
     showToast("저장되었습니다 | Saved");
+    backgroundSyncOne(reportRef.id, reportData); // await 안 함 — 실패해도 저장 자체엔 영향 없음
     resetForm();
   } catch (err) {
     console.error(err);
@@ -858,18 +881,28 @@ async function loadRecentRecords() {
       const r = d.data();
       const color = CATEGORY_COLOR[r.category] || "var(--text-2)";
       const dateStr = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
-      const periodStr = (r.periods && r.periods.length) ? ` · ${r.periods.join(",")}교시 | P${r.periods.join(",")}` : "";
+      const periodStr = (r.periods && r.periods.length) ? `${r.periods.join(",")}교시 | P${r.periods.join(",")}` : "";
       const card = document.createElement("div");
       card.className = "record-card";
       card.style.borderLeftColor = color;
       card.innerHTML = `
-        <div class="top-row">
-          <span class="student-name">${r.studentName} <span style="font-weight:400;color:var(--text-2);font-size:12px;">${r.grade}${r.cls||""}</span></span>
-          <span class="type-badge" style="color:${color};">${r.attendanceType}</span>
+        <div class="summary-row">
+          <span class="summary-text">
+            <span class="student-name">${r.studentName}</span>
+            <span class="sub-inline">${r.grade}${r.cls||""}</span> ·
+            <span class="type-badge" style="color:${color};">${r.attendanceType}</span> ·
+            <span class="sub-inline">${dateStr}</span>
+          </span>
+          <span class="chevron">▾</span>
         </div>
-        <div class="meta">${dateStr}${periodStr}</div>
-        <div class="reason">${r.reason || ""}</div>
+        <div class="record-detail">
+          ${periodStr ? `<div class="meta">${periodStr}</div>` : ""}
+          <div class="reason">${r.reason || ""}</div>
+        </div>
       `;
+      card.querySelector(".summary-row").addEventListener("click", () => {
+        card.classList.toggle("expanded");
+      });
       listEl.appendChild(card);
     });
   } catch (err) {
