@@ -1028,21 +1028,29 @@ async function loadRecentRecords() {
       listEl.innerHTML = `<div class="empty-msg">입력한 기록이 없습니다 | No records yet</div>`;
       return;
     }
+    const records = [];
+    snap.forEach(d => records.push(d.data()));
+    // 출결 날짜(startDate) 기준 최신순 재정렬 (createdAt이 아니라 실제 출결일 기준)
+    records.sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : 0));
+
     listEl.innerHTML = "";
-    snap.forEach(d => {
-      const r = d.data();
+    records.forEach(r => {
       const color = CATEGORY_COLOR[r.category] || "var(--text-2)";
       const dateStr = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
       const periodStr = (r.periods && r.periods.length) ? `${r.periods.join(",")}교시 | P${r.periods.join(",")}` : "";
+      const catEn = (CATEGORY_LABEL[r.category] || "").split("|")[1];
+      const detEn = (DETAIL_LABEL[r.detail] || "").split("|")[1];
+      const enBadge = [detEn, catEn].filter(Boolean).map(s => s.trim()).join(" ");
+      const nameStr = r.studentEngName ? `${r.studentName} · ${r.studentEngName}` : r.studentName;
       const card = document.createElement("div");
       card.className = "record-card";
       card.style.borderLeftColor = color;
       card.innerHTML = `
         <div class="summary-row">
           <span class="summary-text">
-            <span class="student-name">${r.studentName}</span>
+            <span class="student-name">${nameStr}</span>
             <span class="sub-inline">${r.grade}${r.cls||""}</span> ·
-            <span class="type-badge" style="color:${color};">${r.attendanceType}</span> ·
+            <span class="type-badge" style="color:${color};">${r.attendanceType}${enBadge ? " | " + enBadge : ""}</span> ·
             <span class="sub-inline">${dateStr}</span>
           </span>
           <span class="chevron">▾</span>
