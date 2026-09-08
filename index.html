@@ -166,20 +166,24 @@
 
   /* 달력 뷰 */
   .cal-weekdays{ display:grid; grid-template-columns:repeat(7,1fr); text-align:center; font-size:11px; color:var(--text-2); margin-bottom:4px; }
-  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
   .cal-cell{
-    aspect-ratio:1; border-radius:8px; background:#fff; border:1px solid var(--border);
-    display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
-    padding:4px 2px; font-size:12px; cursor:pointer; overflow:hidden;
+    min-height:56px; border-radius:6px; background:#fff; border:1px solid var(--border);
+    display:flex; flex-direction:column; align-items:stretch; justify-content:flex-start;
+    padding:3px 2px; font-size:11px; cursor:pointer; overflow:hidden;
   }
   .cal-cell.empty-cell{ background:transparent; border:none; cursor:default; }
   .cal-cell.has-records{ border-color:var(--primary); border-width:1.5px; }
-  .cal-cell.selected{ background:var(--primary); color:#fff; }
-  .cal-cell .cal-daynum{ font-weight:600; }
-  .cal-dot-row{ display:flex; gap:2px; margin-top:3px; flex-wrap:wrap; justify-content:center; }
-  .cal-dot{ width:5px; height:5px; border-radius:50%; flex-shrink:0; }
-  .cal-more{ font-size:9px; color:var(--text-2); margin-top:1px; }
-  .cal-cell.selected .cal-more{ color:#fff; }
+  .cal-cell.selected{ background:#F1F6FE; border-color:var(--primary); border-width:2px; }
+  .cal-cell .cal-daynum{ font-weight:600; text-align:center; margin-bottom:2px; }
+  .cal-chip-list{ display:flex; flex-direction:column; gap:1.5px; width:100%; }
+  .cal-chip{
+    font-size:8.5px; line-height:1.5; color:#fff; padding:0 3px; border-radius:4px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .cal-chip.cont-left{ border-top-left-radius:0; border-bottom-left-radius:0; margin-left:-2px; padding-left:2px; }
+  .cal-chip.cont-right{ border-top-right-radius:0; border-bottom-right-radius:0; margin-right:-2px; }
+  .cal-more{ font-size:8.5px; color:var(--text-2); margin-top:1px; text-align:center; }
 
   /* ===== 하단 내비 ===== */
   #bottomnav{
@@ -343,6 +347,26 @@
       <div id="view-admin" class="view">
         <div class="card">
           <div class="field">
+            <div class="summary-row" id="sync-accordion-toggle">
+              <span class="field-label" style="margin-bottom:0;">싱크 | Sync</span>
+              <span class="chevron" id="sync-accordion-chevron">▾</span>
+            </div>
+            <div id="sync-accordion-content" style="display:none;margin-top:10px;">
+              <p style="font-size:12px;color:var(--text-2);margin-bottom:10px;line-height:1.5;">
+                구글시트에 직접 데이터를 입력/수정한 뒤 "불러오기"를 누르면, 앱의 과거 기록이 시트 내용으로 통째로 교체됩니다.<br>
+                Edit data directly in the sheet, then "Load" replaces the app's imported records entirely with the sheet's current content.<br><br>
+                "동기화"는 반대로 앱에서 아직 시트로 안 나간 새 기록만 시트 맨 뒤에 추가합니다 (기존 시트 내용은 안 건드림).<br>
+                "Sync" appends only records not yet sent to the sheet, at the end (existing sheet rows are untouched).
+              </p>
+              <button class="submit-btn" id="load-from-sheet-btn" type="button">구글시트에서 불러오기 | Load from Sheet</button>
+              <button class="submit-btn" id="sync-to-sheet-btn" type="button" style="margin-top:8px;background:var(--text-2);">동기화 | Sync</button>
+              <div id="sheet-sync-result" style="font-size:13px;margin-top:10px;white-space:pre-line;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="field">
             <span class="field-label">현재 학년도 | Current Year</span>
             <div class="date-row">
               <input type="text" id="admin-year-input" placeholder="예 | e.g. 2026" style="max-width:140px;">
@@ -357,29 +381,19 @@
 
         <div class="card">
           <div class="field">
-            <span class="field-label">학생 명단 관리 | Student Roster Admin</span>
+            <span class="field-label">학생/교사 관리 | Student & Staff Admin</span>
             <p style="font-size:13px;margin-bottom:10px;">
-              학생 조회/수정/일괄등록은 his-main 관리자 화면에서 진행합니다.<br>
-              View, edit, and bulk-import students in the his-main admin page.
+              조회/수정/일괄등록은 his-main 관리자 화면에서 진행합니다.<br>
+              View, edit, and bulk-import in the his-main admin pages.
             </p>
-            <a href="https://his-main.web.app/admin-students.html" target="_blank" rel="noopener" style="text-decoration:none;">
-              <button class="submit-btn" type="button">admin-students.html 열기 | Open</button>
-            </a>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="field">
-            <span class="field-label">구글시트 ↔ 앱 | Sheet ↔ App</span>
-            <p style="font-size:12px;color:var(--text-2);margin-bottom:10px;line-height:1.5;">
-              구글시트에 직접 데이터를 입력/수정한 뒤 "불러오기"를 누르면, 앱의 과거 기록이 시트 내용으로 통째로 교체됩니다.<br>
-              Edit data directly in the sheet, then "Load" replaces the app's imported records entirely with the sheet's current content.<br><br>
-              "동기화"는 반대로 앱에서 아직 시트로 안 나간 새 기록만 시트 맨 뒤에 추가합니다 (기존 시트 내용은 안 건드림).<br>
-              "Sync" appends only records not yet sent to the sheet, at the end (existing sheet rows are untouched).
-            </p>
-            <button class="submit-btn" id="load-from-sheet-btn" type="button">구글시트에서 불러오기 | Load from Sheet</button>
-            <button class="submit-btn" id="sync-to-sheet-btn" type="button" style="margin-top:8px;background:var(--text-2);">동기화 | Sync</button>
-            <div id="sheet-sync-result" style="font-size:13px;margin-top:10px;white-space:pre-line;"></div>
+            <div class="date-row">
+              <a href="https://his-main.web.app/admin-students.html" target="_blank" rel="noopener" style="text-decoration:none;flex:1;">
+                <button class="submit-btn" type="button" style="width:100%;">학생관리 | Students</button>
+              </a>
+              <a href="https://his-main.web.app/admin.html" target="_blank" rel="noopener" style="text-decoration:none;flex:1;">
+                <button class="submit-btn" type="button" style="width:100%;background:var(--text-2);">교사관리 | Staff</button>
+              </a>
+            </div>
           </div>
         </div>
 
@@ -547,6 +561,14 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
   btn.addEventListener("click", () => showView(btn.dataset.view));
 });
 document.getElementById("admin-btn").addEventListener("click", () => showView("view-admin"));
+
+document.getElementById("sync-accordion-toggle").addEventListener("click", () => {
+  const content = document.getElementById("sync-accordion-content");
+  const chevron = document.getElementById("sync-accordion-chevron");
+  const open = content.style.display !== "none";
+  content.style.display = open ? "none" : "block";
+  chevron.style.transform = open ? "" : "rotate(180deg)";
+});
 
 document.getElementById("admin-year-save-btn").addEventListener("click", async () => {
   const val = document.getElementById("admin-year-input").value.trim();
@@ -1221,8 +1243,19 @@ function renderCalendarMode() {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const byDate = {};
-  myDailyCache.forEach(r => { (byDate[r.date] = byDate[r.date] || []).push(r); });
+  const byReportDate = new Set(); // `${reportId}_${date}` — 연속 여부 판단용
+  myDailyCache.forEach(r => {
+    (byDate[r.date] = byDate[r.date] || []).push(r);
+    byReportDate.add(`${r.reportId}_${r.date}`);
+  });
 
+  function addDays(dateStr, n) {
+    const d = new Date(dateStr + "T00:00:00");
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  const MAX_CHIPS = 3;
   const gridEl = document.getElementById("calendar-grid");
   gridEl.innerHTML = "";
   for (let i = 0; i < startWeekday; i++) {
@@ -1235,10 +1268,17 @@ function renderCalendarMode() {
     const dayRecords = byDate[dateStr] || [];
     const cell = document.createElement("div");
     cell.className = "cal-cell" + (dayRecords.length ? " has-records" : "") + (dateStr === selectedCalDate ? " selected" : "");
-    const dotsHtml = dayRecords.slice(0, 4)
-      .map(r => `<span class="cal-dot" style="background:${CATEGORY_COLOR[r.category] || "var(--text-2)"};"></span>`).join("");
-    cell.innerHTML = `<span class="cal-daynum">${day}</span><div class="cal-dot-row">${dotsHtml}</div>` +
-      (dayRecords.length > 4 ? `<span class="cal-more">+${dayRecords.length - 4}</span>` : "");
+
+    const chipsHtml = dayRecords.slice(0, MAX_CHIPS).map(r => {
+      const contLeft = byReportDate.has(`${r.reportId}_${addDays(dateStr, -1)}`);
+      const contRight = byReportDate.has(`${r.reportId}_${addDays(dateStr, 1)}`);
+      const cls = "cal-chip" + (contLeft ? " cont-left" : "") + (contRight ? " cont-right" : "");
+      const color = CATEGORY_COLOR[r.category] || "var(--text-2)";
+      return `<div class="${cls}" style="background:${color};">${r.studentName}</div>`;
+    }).join("");
+
+    cell.innerHTML = `<span class="cal-daynum">${day}</span><div class="cal-chip-list">${chipsHtml}</div>` +
+      (dayRecords.length > MAX_CHIPS ? `<span class="cal-more">+${dayRecords.length - MAX_CHIPS}</span>` : "");
     cell.addEventListener("click", () => {
       selectedCalDate = dateStr;
       renderCalendarMode();
