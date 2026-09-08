@@ -1195,11 +1195,6 @@ function buildRecordCardEl(r, dateLabel) {
   const detEn = (DETAIL_LABEL[r.detail] || "").split("|")[1];
   const enBadge = [detEn, catEn].filter(Boolean).map(s => s.trim()).join(" ");
   const nameStr = r.studentEngName ? `${r.studentName} · ${r.studentEngName}` : r.studentName;
-  const syncLine = r.synced !== undefined
-    ? `<div class="meta" style="margin-top:6px;">${r.synced
-        ? '<span style="color:#1E8E3E;">✓ 시트 동기화됨 | Synced to sheet</span>'
-        : '<span style="color:var(--late);">○ 동기화 대기 중 | Pending sync</span>'}</div>`
-    : "";
   const card = document.createElement("div");
   card.className = "record-card";
   card.style.borderLeftColor = color;
@@ -1216,7 +1211,6 @@ function buildRecordCardEl(r, dateLabel) {
     <div class="record-detail">
       ${periodStr ? `<div class="meta">${periodStr}</div>` : ""}
       <div class="reason">${r.reason || ""}</div>
-      ${syncLine}
     </div>
   `;
   card.querySelector(".summary-row").addEventListener("click", () => card.classList.toggle("expanded"));
