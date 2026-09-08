@@ -20,6 +20,10 @@
     --late:#E37400;
     --early:#B5710A;
     --classabsent:#9334E6;
+    --detail-approved:#1E8E3E;
+    --detail-sick:#EAA300;
+    --detail-unexcused:#D93025;
+    --detail-other:#9334E6;
     --radius:10px;
     --shell-max:520px;
   }
@@ -152,9 +156,10 @@
     background:#fff; border-radius:8px; padding:12px 14px; margin-bottom:10px;
     border-left:5px solid var(--text-2); box-shadow:0 1px 2px rgba(0,0,0,.06);
   }
-  .record-card .summary-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:pointer; }
-  .record-card .summary-text{ font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .record-card .student-name{ font-weight:700; font-size:15px; }
+  .record-card .summary-row{ display:flex; align-items:center; gap:8px; cursor:pointer; }
+  .record-card .summary-left{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+  .record-card .summary-date{ flex-shrink:0; color:var(--text-2); font-size:11.5px; }
+  .record-card .student-name{ font-weight:700; font-size:13.5px; }
   .record-card .sub-inline{ color:var(--text-2); font-size:12px; }
   .record-card .type-badge{ font-size:12px; font-weight:700; }
   .record-card .chevron{ color:var(--text-2); font-size:12px; flex-shrink:0; transition:transform .15s; }
@@ -482,6 +487,7 @@ provider.setCustomParameters({ hd: ALLOWED_DOMAIN });
 const CATEGORY_LABEL = { "결석":"결석 | Absences", "지각":"지각 | Late", "조퇴":"조퇴 | Early leaving", "결과":"결과 | Absent from class" };
 const DETAIL_LABEL = { "출석인정":"출석 인정 | School Approved", "질병":"질병 | Sick", "미인정":"미인정 | Unexcused", "기타":"기타 | Other" };
 const CATEGORY_COLOR = { "결석":"var(--absence)", "지각":"var(--late)", "조퇴":"var(--early)", "결과":"var(--classabsent)" };
+const DETAIL_COLOR = { "출석인정":"var(--detail-approved)", "질병":"var(--detail-sick)", "미인정":"var(--detail-unexcused)", "기타":"var(--detail-other)" };
 const PERIOD_REQUIRED_CATEGORIES = ["지각","조퇴","결과"];
 
 function renderChipGroup(containerId, labelMap) {
@@ -782,6 +788,7 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
         batch.set(dailyRef, {
           reportId: reportRef.id, date: dateStr,
           studentEmail: reportData.studentEmail, studentName: r.studentName,
+          studentEngName: reportData.studentEngName,
           grade: reportData.grade, cls: reportData.cls,
           category: r.category, detail: r.detail, reason: r.reason,
           periods: r.periods, attendanceType: r.attendanceType,
@@ -1136,6 +1143,7 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
       batch.set(dailyRef, {
         reportId: reportRef.id, date: dateStr,
         studentEmail: selectedStudent.email, studentName: selectedStudent.name,
+        studentEngName: selectedStudent.engName || "",
         grade: selectedStudent.grade, cls: selectedStudent.cls,
         category: selectedCategory, detail: selectedDetail, reason: reasonInput.value.trim(),
         periods: periodsArr, attendanceType,
@@ -1189,7 +1197,7 @@ let calendarCursor = new Date();
 let selectedCalDate = null;
 
 function buildRecordCardEl(r, dateLabel) {
-  const color = CATEGORY_COLOR[r.category] || "var(--text-2)";
+  const color = DETAIL_COLOR[r.detail] || "var(--text-2)";
   const periodStr = (r.periods && r.periods.length) ? `${r.periods.join(",")}교시 | P${r.periods.join(",")}` : "";
   const catEn = (CATEGORY_LABEL[r.category] || "").split("|")[1];
   const detEn = (DETAIL_LABEL[r.detail] || "").split("|")[1];
@@ -1200,12 +1208,12 @@ function buildRecordCardEl(r, dateLabel) {
   card.style.borderLeftColor = color;
   card.innerHTML = `
     <div class="summary-row">
-      <span class="summary-text">
+      <span class="summary-left">
         <span class="student-name">${nameStr}</span>
         <span class="sub-inline">${r.grade}${r.cls || ""}</span> ·
-        <span class="type-badge" style="color:${color};">${r.attendanceType}${enBadge ? " | " + enBadge : ""}</span> ·
-        <span class="sub-inline">${dateLabel}</span>
+        <span class="type-badge" style="color:${color};">${r.attendanceType}${enBadge ? " | " + enBadge : ""}</span>
       </span>
+      <span class="summary-date">${dateLabel}</span>
       <span class="chevron">▾</span>
     </div>
     <div class="record-detail">
@@ -1341,7 +1349,7 @@ function renderCalendarMode() {
       const contLeft = byReportDate.has(`${r.reportId}_${addDays(dateStr, -1)}`);
       const contRight = byReportDate.has(`${r.reportId}_${addDays(dateStr, 1)}`);
       const cls = "cal-chip" + (contLeft ? " cont-left" : "") + (contRight ? " cont-right" : "");
-      const color = CATEGORY_COLOR[r.category] || "var(--text-2)";
+      const color = DETAIL_COLOR[r.detail] || "var(--text-2)";
       return `<div class="${cls}" style="background:${color};">${r.studentName}</div>`;
     }).join("");
 
