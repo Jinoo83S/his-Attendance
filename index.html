@@ -625,41 +625,54 @@ function shortLabel(raw) {
   return raw.split("|")[0].replace(/\s+/g, "").trim();
 }
 
+// 원본 시트의 고정 컬럼 순서 (헤더 텍스트는 복사 과정에서 깨지는 일이 반복되어 신뢰하지 않음 —
+// 데이터 행은 지금까지 항상 이 순서로 일관되게 확인됨)
+const LEGACY_COL = {
+  start: 0, end: 1, endPlus1: 2, grade: 3, cls: 4, homeroom: 5, name: 6, engName: 7,
+  category: 8, detail: 9, reason: 10, draft: 11, attType: 12, reasonKo: 13, periods: 14
+};
+
+function normalizeDate(raw) {
+  if (!raw) return "";
+  const s = raw.trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  m = s.match(/^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?$/); // "2026. 5. 14" 또는 "2026.05.14."
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  return s;
+}
+
 function parseLegacyPaste(text) {
   const lines = text.trim().split(/\r?\n/).filter(l => l.trim().length > 0);
-  if (lines.length < 2) throw new Error("헤더 + 데이터 최소 2줄 필요 | Need header + at least 1 data row");
-  const headers = lines[0].split("\t").map(h => h.trim());
-  const idx = {};
-  headers.forEach((h, i) => { idx[h] = i; });
-  const c = (name) => (idx[name] !== undefined ? idx[name] : -1);
-  const col = {
-    start: c("Start Date"), end: c("End Date"), grade: c("학년"), cls: c("반"),
-    homeroom: c("담임"), name: c("이름"), engName: c("Name"), category: c("분류"),
-    detail: c("상세"), reasonEn: c("Reason"), reasonKo: c("사유"), attType: c("출결구분"),
-    periods: c("교시선택")
-  };
-  if (col.start < 0 || col.end < 0 || col.name < 0) {
-    throw new Error("필수 헤더(Start Date/End Date/이름)를 찾을 수 없습니다 | Missing required headers");
-  }
+  if (lines.length === 0) throw new Error("데이터가 없습니다 | No data");
 
+  // 첫 줄이 날짜로 시작하지 않으면 헤더로 간주하고 건너뜀 (헤더 텍스트 자체는 사용 안 함)
+  const firstCell = lines[0].split("\t")[0].trim();
+  const looksLikeDate = /^\d{4}[-.]/.test(firstCell);
+  const dataLines = looksLikeDate ? lines : lines.slice(1);
+  if (dataLines.length === 0) throw new Error("데이터 행이 없습니다 | No data rows");
+
+  const get = (cells, i) => (cells[i] || "").trim();
   const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cells = lines[i].split("\t");
-    const get = (idx2) => (idx2 >= 0 ? (cells[idx2] || "").trim() : "");
-    const startDate = get(col.start);
-    const endDate = get(col.end) || startDate;
-    if (!startDate || !get(col.name)) continue; // 빈 줄 스킵
-    const categoryShort = shortLabel(get(col.category));
-    const detailShort = shortLabel(get(col.detail));
-    const periodsRaw = get(col.periods);
+  for (const line of dataLines) {
+    const cells = line.split("\t");
+    const studentName = get(cells, LEGACY_COL.name);
+    const startDate = normalizeDate(get(cells, LEGACY_COL.start));
+    if (!startDate || !studentName) continue; // 빈 줄/이름 없는 줄 스킵
+
+    const endDate = normalizeDate(get(cells, LEGACY_COL.end)) || startDate;
+    const categoryShort = shortLabel(get(cells, LEGACY_COL.category));
+    const detailShort = shortLabel(get(cells, LEGACY_COL.detail));
+    const periodsRaw = get(cells, LEGACY_COL.periods);
+
     rows.push({
       startDate, endDate,
-      grade: get(col.grade), cls: get(col.cls),
-      legacyHomeroom: get(col.homeroom),
-      studentName: get(col.name), studentEngName: get(col.engName),
+      grade: get(cells, LEGACY_COL.grade), cls: get(cells, LEGACY_COL.cls),
+      legacyHomeroom: get(cells, LEGACY_COL.homeroom),
+      studentName, studentEngName: get(cells, LEGACY_COL.engName),
       category: categoryShort, detail: detailShort,
-      reason: get(col.reasonKo) || get(col.reasonEn),
-      attendanceType: (detailShort && categoryShort) ? (detailShort + categoryShort) : get(col.attType),
+      reason: get(cells, LEGACY_COL.reasonKo) || get(cells, LEGACY_COL.reason),
+      attendanceType: (detailShort && categoryShort) ? (detailShort + categoryShort) : get(cells, LEGACY_COL.attType),
       periods: periodsRaw ? periodsRaw.split(",").map(p => p.trim()).filter(Boolean) : []
     });
   }
