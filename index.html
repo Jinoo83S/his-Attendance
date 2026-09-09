@@ -470,7 +470,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   initializeFirestore, doc, getDoc, setDoc, collection, query, where, orderBy, limit,
-  getDocs, writeBatch, serverTimestamp
+  getDocs, writeBatch, serverTimestamp, increment
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 // TODO: apiKey 등은 공개 저장소(GitHub 등)에 올릴 경우 Firebase 콘솔에서
@@ -804,7 +804,8 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
           grade: reportData.grade, cls: reportData.cls,
           category: r.category, detail: r.detail, reason: r.reason,
           periods: r.periods, attendanceType: r.attendanceType,
-          createdBy: myStaff.email, createdByName: myStaff.name
+          createdBy: myStaff.email, createdByName: myStaff.name,
+          createdAt: serverTimestamp()
         });
         opsInBatch++;
       });
@@ -817,6 +818,7 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
       }
     }
     if (opsInBatch > 0) await batch.commit();
+    await bumpDataVersion();
 
     resultEl.textContent =
       `불러오기 완료: ${written}건 (학생 매칭 ${matched} / 실패 ${unmatched})\n` +
@@ -1009,6 +1011,12 @@ document.getElementById("delete-all-attendance-btn").addEventListener("click", a
     const deletedDaily = await deleteInChunks(dailyRefs, (d, t) => {
       btn.textContent = `일자기록 삭제 중... ${d}/${t} | Deleting daily... ${d}/${t}`;
     });
+
+    await bumpDataVersion();
+    localStorage.removeItem(CACHE_KEY);
+    dataCache = { dataVersion: 0, lastFetchAt: null, reports: {}, daily: {} };
+    allReportsCache = [];
+    allDailyCache = [];
 
     resultEl.textContent =
       `전체 삭제 완료: attendanceReports ${deletedReports}건, attendanceDaily ${deletedDaily}건\n` +
@@ -1241,7 +1249,8 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
         grade: selectedStudent.grade, cls: selectedStudent.cls,
         category: selectedCategory, detail: selectedDetail, reason: reasonInput.value.trim(),
         periods: periodsArr, attendanceType,
-        createdBy: myStaff.email, createdByName: myStaff.name
+        createdBy: myStaff.email, createdByName: myStaff.name,
+        createdAt: serverTimestamp()
       });
     });
 
@@ -1321,16 +1330,70 @@ function buildRecordCardEl(r, dateLabel, metaExtra) {
   return card;
 }
 
-// ===== 오늘 화면 (학교 전체 — 본인 것만이 아님) =====
+// ===== 로컬 캐시 동기화 엔진 =====
+// 매번 컬렉션 전체를 읽는 대신, 각 브라우저의 localStorage에 누적 저장해두고
+// "마지막 동기화 이후 새로 생긴 것"만 서버에서 읽어옵니다.
+// 전체삭제/불러오기처럼 문서를 "삭제"하는 작업은 증분 방식으로 못 잡으므로,
+// settings/general.dataVersion을 그런 작업 후에 올려서 강제로 전체 재동기화하게 합니다.
+const CACHE_KEY = "hisAttendanceCache_v1";
+let dataCache = loadLocalCache();
+
+function loadLocalCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { console.warn("캐시 로드 실패, 새로 시작:", e); }
+  return { dataVersion: 0, lastFetchAt: null, reports: {}, daily: {} };
+}
+function saveLocalCache() {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(dataCache)); }
+  catch (e) { console.warn("캐시 저장 실패 (용량 초과 등):", e); }
+}
+
+async function syncCacheFromServer() {
+  const settingsSnap = await getDoc(doc(db, "settings", "general"));
+  const serverVersion = settingsSnap.exists() ? (settingsSnap.data().dataVersion || 0) : 0;
+
+  if (dataCache.dataVersion !== serverVersion) {
+    // 버전이 다름 = 어딘가서 삭제/재구성이 있었음 → 안전하게 전체 재동기화
+    const [reportsSnap, dailySnap] = await Promise.all([
+      getDocs(collection(db, "attendanceReports")),
+      getDocs(collection(db, "attendanceDaily"))
+    ]);
+    dataCache = { dataVersion: serverVersion, lastFetchAt: new Date().toISOString(), reports: {}, daily: {} };
+    reportsSnap.forEach(d => { dataCache.reports[d.id] = d.data(); });
+    dailySnap.forEach(d => { dataCache.daily[d.id] = d.data(); });
+  } else {
+    // 마지막 동기화 이후 새로 생긴 것만 (60초 여유를 둬서 기기간 시계 오차 방지)
+    const sinceMs = (dataCache.lastFetchAt ? new Date(dataCache.lastFetchAt).getTime() : 0) - 60000;
+    const since = new Date(Math.max(sinceMs, 0));
+    const [reportsSnap, dailySnap] = await Promise.all([
+      getDocs(query(collection(db, "attendanceReports"), where("createdAt", ">", since))),
+      getDocs(query(collection(db, "attendanceDaily"), where("createdAt", ">", since)))
+    ]);
+    reportsSnap.forEach(d => { dataCache.reports[d.id] = d.data(); });
+    dailySnap.forEach(d => { dataCache.daily[d.id] = d.data(); });
+    dataCache.lastFetchAt = new Date().toISOString();
+  }
+  saveLocalCache();
+  allReportsCache = Object.values(dataCache.reports);
+  allDailyCache = Object.values(dataCache.daily);
+}
+
+// 전체삭제/불러오기 등 "삭제를 포함하는" 작업 후 반드시 호출 — 모든 기기가 다음 방문 때 전체 재동기화하게 함
+async function bumpDataVersion() {
+  await setDoc(doc(db, "settings", "general"), { dataVersion: increment(1) }, { merge: true });
+}
+
+// ===== 오늘 화면 (학교 전체 — 본인 것만이 아님, 로컬 캐시 기반) =====
 async function loadTodayList() {
   const today = toLocalDateStr(new Date());
   document.getElementById("today-date-label").textContent = `오늘 (${today}) | Today`;
   const listEl = document.getElementById("today-list");
   listEl.innerHTML = `<div class="empty-msg">불러오는 중... | Loading...</div>`;
   try {
-    const snap = await getDocs(query(collection(db, "attendanceDaily"), where("date", "==", today)));
-    const items = [];
-    snap.forEach(d => items.push(d.data()));
+    await syncCacheFromServer();
+    const items = allDailyCache.filter(r => r.date === today);
     items.sort((a, b) => `${a.grade}${a.cls}`.localeCompare(`${b.grade}${b.cls}`) || a.studentName.localeCompare(b.studentName));
 
     if (items.length === 0) {
@@ -1346,14 +1409,7 @@ async function loadTodayList() {
 }
 
 async function fetchRecentData() {
-  const [reportsSnap, dailySnap] = await Promise.all([
-    getDocs(collection(db, "attendanceReports")),
-    getDocs(collection(db, "attendanceDaily"))
-  ]);
-  allReportsCache = [];
-  reportsSnap.forEach(d => allReportsCache.push(d.data()));
-  allDailyCache = [];
-  dailySnap.forEach(d => allDailyCache.push(d.data()));
+  await syncCacheFromServer();
 }
 
 function renderListMode() {
