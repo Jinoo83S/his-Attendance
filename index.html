@@ -196,6 +196,13 @@
     display:flex; background:#fff; border-top:1px solid var(--border);
     position:absolute; left:0; right:0; bottom:0; flex-shrink:0;
   }
+  .report-fab{
+    position:absolute; right:16px; bottom:82px; width:52px; height:52px; border-radius:50%;
+    background:var(--primary); color:#fff; border:none; cursor:pointer; z-index:20;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 2px 10px rgba(0,0,0,.3);
+  }
+  .report-fab:active{ background:var(--primary-dark); }
   .nav-btn{
     flex:1; border:none; background:none; padding:9px 4px 10px; cursor:pointer;
     display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--text-2); font-size:11px; font-weight:500;
@@ -362,6 +369,7 @@
             <span class="field-label">동기화 | Sync</span>
             <p id="last-sync-label" style="font-size:13px;color:var(--text-2);margin-bottom:10px;">확인 중... | Checking...</p>
             <button class="submit-btn" id="sync-quick-btn" type="button">동기화 | Sync</button>
+            <button class="clear-student" id="reset-cache-btn" type="button" style="margin-top:8px;">이 기기 캐시 초기화(전체 재동기화) | Reset this device's cache</button>
             <div id="pending-sync-list" style="margin-top:12px;"></div>
           </div>
         </div>
@@ -413,6 +421,18 @@
 
         <div class="card">
           <div class="field">
+            <span class="field-label">출결현황보고서 링크 | Attendance Report Link</span>
+            <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;line-height:1.5;">
+              오늘/최근기록 화면 우측 하단 버튼이 열 구글시트 등 외부 링크입니다.<br>
+              The external link (e.g. Google Sheet) opened by the button on Today/Recent screens.
+            </p>
+            <input type="text" id="report-url-input" placeholder="https://docs.google.com/spreadsheets/..." style="width:100%;">
+            <button class="clear-student" id="report-url-save-btn" style="margin-top:8px;">저장 | Save</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="field">
             <span class="field-label">학생/교사 관리 | Student & Staff Admin</span>
             <p style="font-size:13px;margin-bottom:10px;">
               조회/수정/일괄등록은 his-main 관리자 화면에서 진행합니다.<br>
@@ -443,6 +463,10 @@
       </div>
 
     </div>
+
+    <button id="report-fab" class="report-fab" title="출결현황보고서 | Attendance Report">
+      <svg viewBox="0 0 24 24" fill="none" width="24" height="24"><path d="M14 3h7v7M21 3l-9 9M5 5h6M5 9h4M5 13h8M5 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
 
     <div id="bottomnav">
       <button class="nav-btn active" data-view="view-today">
@@ -485,6 +509,7 @@ const firebaseConfig = {
 };
 const ALLOWED_DOMAIN = "his.sc.kr";
 let CURRENT_YEAR = null; // settings/general.currentYear 에서 로드 (his-main 전체와 동일 기준)
+let REPORT_SHEET_URL = ""; // settings/general.reportUrl — 오늘/최근기록의 외부링크 버튼용
 
 // Apps Script 배포 완료 — sheet-sync-apps-script.gs 참고
 const SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbxDpd3AQMa7uvSPO5ebUS24sMrkvxR9_L4gMMqxPvvvH54eqW97ELFL6JRmspnrG1Hc/exec";
@@ -575,6 +600,7 @@ onAuthStateChanged(auth, async (user) => {
 
   const settingsSnap = await getDoc(doc(db, "settings", "general"));
   CURRENT_YEAR = settingsSnap.exists() ? (settingsSnap.data().currentYear || "") : "";
+  REPORT_SHEET_URL = settingsSnap.exists() ? (settingsSnap.data().reportUrl || "") : "";
   if (!CURRENT_YEAR) {
     showToast(myStaff.role === "admin"
       ? "현재 학년도 미설정 — 관리자 버튼에서 설정하세요 | Year not set — set it via the Admin button"
@@ -589,10 +615,13 @@ onAuthStateChanged(auth, async (user) => {
 function showView(viewId) {
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.view === viewId));
   document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === viewId));
+  document.getElementById("report-fab").style.display =
+    (viewId === "view-today" || viewId === "view-recent") ? "flex" : "none";
   if (viewId === "view-today") loadTodayList();
   if (viewId === "view-recent") loadRecentRecords();
   if (viewId === "view-admin") {
     document.getElementById("admin-year-input").value = CURRENT_YEAR || "";
+    document.getElementById("report-url-input").value = REPORT_SHEET_URL || "";
     updateLastSyncLabel();
   }
 }
@@ -621,6 +650,26 @@ document.getElementById("admin-year-save-btn").addEventListener("click", async (
     console.error(err);
     showToast("저장 실패 | Save failed: " + err.message);
   }
+});
+
+document.getElementById("report-url-save-btn").addEventListener("click", async () => {
+  const val = document.getElementById("report-url-input").value.trim();
+  try {
+    await setDoc(doc(db, "settings", "general"), { reportUrl: val }, { merge: true });
+    REPORT_SHEET_URL = val;
+    showToast(val ? "링크 저장됨 | Link saved" : "링크 삭제됨 | Link cleared");
+  } catch (err) {
+    console.error(err);
+    showToast("저장 실패 | Save failed: " + err.message);
+  }
+});
+
+document.getElementById("report-fab").addEventListener("click", () => {
+  if (!REPORT_SHEET_URL) {
+    showToast("관리자가 링크를 아직 설정하지 않았습니다 | Admin hasn't set this link yet");
+    return;
+  }
+  window.open(REPORT_SHEET_URL, "_blank", "noopener");
 });
 
 // ===== 구글시트 ↔ 앱 (전체 불러오기/저장하기) =====
@@ -978,6 +1027,26 @@ async function updateSyncHistoryList() {
     listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">확인 실패 | Failed to check: ${err.message}</div>`;
   }
 }
+
+document.getElementById("reset-cache-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("reset-cache-btn");
+  btn.disabled = true;
+  btn.textContent = "초기화 중... | Resetting...";
+  try {
+    localStorage.removeItem(CACHE_KEY);
+    dataCache = { dataVersion: 0, lastFetchAt: null, reports: {}, daily: {} };
+    allReportsCache = [];
+    allDailyCache = [];
+    await bumpDataVersion(); // 다른 기기들도 다음 방문 때 전체 재동기화하도록
+    showToast("캐시 초기화 완료 — 오늘/최근기록에서 다시 확인해주세요 | Cache reset — check Today/Recent again");
+  } catch (err) {
+    console.error(err);
+    showToast("초기화 실패 | Reset failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "이 기기 캐시 초기화(전체 재동기화) | Reset this device's cache";
+  }
+});
 
 document.getElementById("sync-quick-btn").addEventListener("click", () => {
   performSync(document.getElementById("sync-quick-btn"), null);
@@ -1354,7 +1423,7 @@ async function syncCacheFromServer() {
   const settingsSnap = await getDoc(doc(db, "settings", "general"));
   const serverVersion = settingsSnap.exists() ? (settingsSnap.data().dataVersion || 0) : 0;
 
-  if (dataCache.dataVersion !== serverVersion) {
+  if (dataCache.dataVersion !== serverVersion || !dataCache.lastFetchAt) {
     // 버전이 다름 = 어딘가서 삭제/재구성이 있었음 → 안전하게 전체 재동기화
     const [reportsSnap, dailySnap] = await Promise.all([
       getDocs(collection(db, "attendanceReports")),
