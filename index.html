@@ -368,6 +368,17 @@
 
         <div class="card">
           <div class="field">
+            <span class="field-label">최근 동기화 기록 | Recently Synced</span>
+            <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;">
+              전 교직원의 자동/수동 동기화 내역입니다 (최신순 최대 30건).<br>
+              Auto/manual sync history across all staff (latest 30).
+            </p>
+            <div id="sync-history-list"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="field">
             <div class="summary-row" id="sync-accordion-toggle">
               <span class="field-label" style="margin-bottom:0;">구글시트 불러오기 | 동기화 | Load &amp; Sync</span>
               <span class="chevron" id="sync-accordion-chevron">▾</span>
@@ -912,6 +923,7 @@ async function updateLastSyncLabel() {
     labelEl.textContent = "동기화 상태 확인 실패 | Failed to check sync status";
   }
   updatePendingSyncList();
+  updateSyncHistoryList();
 }
 
 async function updatePendingSyncList() {
@@ -930,6 +942,34 @@ async function updatePendingSyncList() {
     sorted.forEach(r => {
       const dateLabel = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
       listEl.appendChild(buildRecordCardEl(r, dateLabel));
+    });
+  } catch (err) {
+    console.error(err);
+    listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">확인 실패 | Failed to check: ${err.message}</div>`;
+  }
+}
+
+async function updateSyncHistoryList() {
+  const listEl = document.getElementById("sync-history-list");
+  listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">확인 중... | Checking...</div>`;
+  try {
+    const snap = await getDocs(query(collection(db, "attendanceReports"), where("synced", "==", true)));
+    const synced = [];
+    snap.forEach(d => { const data = d.data(); if (data.syncedAt) synced.push(data); });
+    if (synced.length === 0) {
+      listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">동기화된 기록 없음 | No synced records yet</div>`;
+      return;
+    }
+    synced.sort((a, b) => (b.syncedAt.seconds ?? 0) - (a.syncedAt.seconds ?? 0));
+    const top = synced.slice(0, 30);
+    listEl.innerHTML = "";
+    top.forEach(r => {
+      const dateLabel = r.startDate === r.endDate ? r.startDate : `${r.startDate} ~ ${r.endDate}`;
+      const syncedTime = r.syncedAt.toDate
+        ? r.syncedAt.toDate().toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+        : "";
+      const metaExtra = `입력: ${r.createdByName || r.createdBy} · 동기화: ${syncedTime} | By: ${r.createdByName || r.createdBy} · Synced: ${syncedTime}`;
+      listEl.appendChild(buildRecordCardEl(r, dateLabel, metaExtra));
     });
   } catch (err) {
     console.error(err);
@@ -1251,7 +1291,7 @@ let monthCursor = new Date();
 let calendarCursor = new Date();
 let selectedCalDate = null;
 
-function buildRecordCardEl(r, dateLabel) {
+function buildRecordCardEl(r, dateLabel, metaExtra) {
   const color = DETAIL_COLOR[r.detail] || "var(--text-2)";
   const periodStr = (r.periods && r.periods.length) ? `${r.periods.join(",")}교시 | P${r.periods.join(",")}` : "";
   const catEn = (CATEGORY_LABEL[r.category] || "").split("|")[1];
@@ -1274,6 +1314,7 @@ function buildRecordCardEl(r, dateLabel) {
     <div class="record-detail">
       ${periodStr ? `<div class="meta">${periodStr}</div>` : ""}
       <div class="reason">${r.reason || ""}</div>
+      ${metaExtra ? `<div class="meta" style="margin-top:6px;">${metaExtra}</div>` : ""}
     </div>
   `;
   card.querySelector(".summary-row").addEventListener("click", () => card.classList.toggle("expanded"));
