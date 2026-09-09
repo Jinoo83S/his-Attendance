@@ -1285,8 +1285,8 @@ function showToast(msg) {
 }
 
 // ===== 최근 기록 (목록 / 월별 / 달력) =====
-let myReportsCache = [];
-let myDailyCache = [];
+let allReportsCache = [];
+let allDailyCache = [];
 let monthCursor = new Date();
 let calendarCursor = new Date();
 let selectedCalDate = null;
@@ -1347,13 +1347,13 @@ async function loadTodayList() {
 
 async function fetchRecentData() {
   const [reportsSnap, dailySnap] = await Promise.all([
-    getDocs(query(collection(db, "attendanceReports"), where("createdBy", "==", myStaff.email))),
-    getDocs(query(collection(db, "attendanceDaily"), where("createdBy", "==", myStaff.email)))
+    getDocs(collection(db, "attendanceReports")),
+    getDocs(collection(db, "attendanceDaily"))
   ]);
-  myReportsCache = [];
-  reportsSnap.forEach(d => myReportsCache.push(d.data()));
-  myDailyCache = [];
-  dailySnap.forEach(d => myDailyCache.push(d.data()));
+  allReportsCache = [];
+  reportsSnap.forEach(d => allReportsCache.push(d.data()));
+  allDailyCache = [];
+  dailySnap.forEach(d => allDailyCache.push(d.data()));
 }
 
 function renderListMode() {
@@ -1361,7 +1361,7 @@ function renderListMode() {
   const startFilter = document.getElementById("recent-filter-start").value;
   const endFilter = document.getElementById("recent-filter-end").value;
 
-  let items = myReportsCache;
+  let items = allReportsCache;
   if (startFilter) items = items.filter(r => r.endDate >= startFilter);
   if (endFilter) items = items.filter(r => r.startDate <= endFilter);
   items = sortByStartDate(items).reverse();
@@ -1383,7 +1383,7 @@ function renderMonthMode() {
   const key = monthKey(monthCursor);
   document.getElementById("month-label").textContent =
     `${monthCursor.getFullYear()}년 ${monthCursor.getMonth() + 1}월 | ${monthCursor.toLocaleString("en-US", { month: "long" })} ${monthCursor.getFullYear()}`;
-  const items = myDailyCache.filter(r => r.date.startsWith(key))
+  const items = allDailyCache.filter(r => r.date.startsWith(key))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   const listEl = document.getElementById("month-list");
   if (items.length === 0) {
@@ -1396,7 +1396,7 @@ function renderMonthMode() {
 
 function renderCalendarDayList(dateStr) {
   const listEl = document.getElementById("calendar-day-list");
-  const items = myDailyCache.filter(r => r.date === dateStr);
+  const items = allDailyCache.filter(r => r.date === dateStr);
   if (items.length === 0) {
     listEl.innerHTML = `<div class="empty-msg">${dateStr}: 기록 없음 | No records</div>`;
     return;
@@ -1416,7 +1416,7 @@ function renderCalendarMode() {
 
   const byDate = {};
   const byReportDate = new Set(); // `${reportId}_${date}` — 연속 여부 판단용
-  myDailyCache.forEach(r => {
+  allDailyCache.forEach(r => {
     (byDate[r.date] = byDate[r.date] || []).push(r);
     byReportDate.add(`${r.reportId}_${r.date}`);
   });
