@@ -477,6 +477,37 @@
 
         <div class="card">
           <div class="field">
+            <span class="field-label">교사 권한 관리 | Staff Permissions</span>
+            <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;">
+              이 앱에서 role(교사/직원/관리자)과 홈룸만 빠르게 바꿉니다. 그 외 정보 수정은 위 "교사관리"에서.<br>
+              Quickly change role and homeroom here. Everything else is edited via "Staff" above.
+            </p>
+            <input type="text" id="staff-perm-search" placeholder="이름으로 검색 | Search by name">
+            <div id="staff-perm-results"></div>
+            <div id="staff-perm-editor" style="display:none;margin-top:12px;">
+              <div class="selected-student" id="staff-perm-selected-box" style="margin-bottom:12px;">
+                <div>
+                  <div class="name" id="staff-perm-selected-name"></div>
+                  <div class="sub" id="staff-perm-selected-email"></div>
+                </div>
+                <button class="clear-student" id="staff-perm-clear-btn">변경 | Change</button>
+              </div>
+              <span class="field-label">역할 | Role</span>
+              <div class="chip-group" id="staff-perm-role-group" style="margin-bottom:16px;">
+                <div class="chip" data-role="teacher">교사 | Teacher</div>
+                <div class="chip" data-role="staff">직원 | Staff</div>
+                <div class="chip" data-role="admin">관리자 | Admin</div>
+              </div>
+              <span class="field-label">홈룸 | Homeroom</span>
+              <input type="text" id="staff-perm-homeroom-input" placeholder="예 | e.g. 8A (비우면 없음 | blank = none)" style="margin-bottom:12px;">
+              <button class="submit-btn" id="staff-perm-save-btn" type="button">저장 | Save</button>
+              <div id="staff-perm-result" style="font-size:13px;margin-top:8px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="field">
             <span class="field-label">전체 출결 데이터 삭제 | Delete All Attendance Data</span>
             <p style="font-size:12px;color:var(--absence);margin-bottom:10px;line-height:1.5;">
               attendanceReports/attendanceDaily 전체를 삭제합니다. 구글시트 내용에는 영향 없습니다. 되돌릴 수 없습니다.<br>
@@ -615,7 +646,8 @@ onAuthStateChanged(auth, async (user) => {
   myStaff = {
     email: user.email,
     name: sd.displayName || sd.nameKo || sd.nameEn || user.email.split("@")[0],
-    role: sd.role || ""
+    role: sd.role || "",
+    homeroom: sd.homeroom || ""
   };
   document.getElementById("user-name").textContent = myStaff.name;
   if (myStaff.role === "admin") {
@@ -636,6 +668,7 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   await loadStudentRoster();
+  applyHomeroomDefaultFilter();
   loadTodayList();
 });
 
@@ -1090,7 +1123,9 @@ document.getElementById("reset-cache-btn").addEventListener("click", async () =>
   btn.textContent = "초기화 중... | Resetting...";
   try {
     clearLocalCache();
+    localStorage.removeItem(ROSTER_CACHE_KEY);
     await bumpDataVersion(); // 다른 기기들도 다음 방문 때 전체 재동기화하도록
+    await loadStudentRoster();
     showToast("캐시 초기화 완료 — 오늘/최근기록에서 다시 확인해주세요 | Cache reset — check Today/Recent again");
   } catch (err) {
     console.error(err);
@@ -1152,7 +1187,28 @@ document.getElementById("delete-all-attendance-btn").addEventListener("click", a
   }
 });
 
+const ROSTER_CACHE_KEY = "hisStudentRosterCache_v1";
+const ROSTER_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12시간 — admin-students.html은 별도 앱이라 변경 신호를 못 받으므로 시간 기반
+
+function loadRosterCache() {
+  try {
+    const raw = localStorage.getItem(ROSTER_CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { console.warn("명단 캐시 로드 실패:", e); }
+  return null;
+}
+function saveRosterCache(payload) {
+  try { localStorage.setItem(ROSTER_CACHE_KEY, JSON.stringify(payload)); }
+  catch (e) { console.warn("명단 캐시 저장 실패:", e); }
+}
+
 async function loadStudentRoster() {
+  const cached = loadRosterCache();
+  if (cached && cached.year === CURRENT_YEAR && (Date.now() - cached.fetchedAt) < ROSTER_CACHE_MAX_AGE_MS) {
+    studentRoster = cached.roster;
+    populateFilterChips();
+    return;
+  }
   studentRoster = [];
   const q = query(collection(db, "studentRecords"), where("year", "==", CURRENT_YEAR));
   const snap = await getDocs(q);
@@ -1165,6 +1221,7 @@ async function loadStudentRoster() {
     });
   });
   populateFilterChips();
+  saveRosterCache({ year: CURRENT_YEAR, fetchedAt: Date.now(), roster: studentRoster });
 }
 
 const resultsEl = document.getElementById("student-results");
@@ -1198,6 +1255,22 @@ resultsEl.addEventListener("click", (e) => {
 });
 
 // ----- 학년/반 칩 (분류·상세와 동일한 토글 버튼 패턴) -----
+function applyHomeroomDefaultFilter() {
+  const m = (myStaff.homeroom || "").match(/^(\d+)([A-Za-z]?)$/);
+  if (!m) return; // 홈룸 없음, 또는 기숙사 코드("Love 1" 등)처럼 학년-반 형태가 아님
+  const [, grade, cls] = m;
+  const gradeChip = document.querySelector(`#grade-filter-group .chip[data-grade="${grade}"]`);
+  if (!gradeChip) return;
+  gradeChip.classList.add("selected");
+  filterGrade = grade;
+  updateClsChipsForGrade(grade);
+  if (cls) {
+    const clsChip = document.querySelector(`#cls-filter-group .chip[data-cls="${cls}"]`);
+    if (clsChip) { clsChip.classList.add("selected"); filterCls = cls; }
+  }
+  updateStudentResults();
+}
+
 function populateFilterChips() {
   const grades = [...new Set(studentRoster.map(s => s.grade).filter(g => g !== ""))]
     .sort((a, b) => Number(a) - Number(b));
@@ -1255,6 +1328,94 @@ document.getElementById("clear-student-btn").addEventListener("click", () => {
   document.getElementById("selected-student-box").style.display = "none";
   document.getElementById("student-picker").style.display = "block";
   updateSubmitState();
+});
+
+// ===== 교사 권한 관리 (role/homeroom 빠른 수정) =====
+let staffRosterCache = null; // 지연 로드 — isAdmin()만 list 가능, 실제로 검색할 때만 읽음
+let selectedStaffPerm = null;
+
+async function ensureStaffRosterLoaded() {
+  if (staffRosterCache) return;
+  const snap = await getDocs(collection(db, "staff"));
+  staffRosterCache = [];
+  snap.forEach(d => staffRosterCache.push({ email: d.id, ...d.data() }));
+}
+
+document.getElementById("staff-perm-search").addEventListener("input", async (e) => {
+  const q = e.target.value.trim();
+  const resultsEl = document.getElementById("staff-perm-results");
+  if (!q) { resultsEl.innerHTML = ""; return; }
+  resultsEl.innerHTML = `<div class="empty-msg" style="padding:8px 0;">검색 중... | Searching...</div>`;
+  await ensureStaffRosterLoaded();
+  const name = s => s.displayName || s.nameKo || s.nameEn || s.email;
+  const matches = staffRosterCache.filter(s =>
+    name(s).toLowerCase().includes(q.toLowerCase()) || s.email.toLowerCase().includes(q.toLowerCase())
+  ).slice(0, 8);
+  if (matches.length === 0) {
+    resultsEl.innerHTML = `<div class="empty-msg" style="padding:8px 0;">검색 결과가 없습니다 | No results found</div>`;
+    return;
+  }
+  resultsEl.innerHTML = "";
+  matches.forEach(s => {
+    const item = document.createElement("div");
+    item.className = "student-opt";
+    item.innerHTML = `<span>${name(s)}</span><span class="sub">${s.email} · ${s.role || "-"}${s.homeroom ? " · " + s.homeroom : ""}</span>`;
+    item.addEventListener("click", () => selectStaffForEdit(s));
+    resultsEl.appendChild(item);
+  });
+});
+
+function selectStaffForEdit(s) {
+  selectedStaffPerm = s;
+  const name = s.displayName || s.nameKo || s.nameEn || s.email;
+  document.getElementById("staff-perm-selected-name").textContent = name;
+  document.getElementById("staff-perm-selected-email").textContent = s.email;
+  document.getElementById("staff-perm-homeroom-input").value = s.homeroom || "";
+  document.querySelectorAll("#staff-perm-role-group .chip").forEach(c =>
+    c.classList.toggle("selected", c.dataset.role === s.role)
+  );
+  document.getElementById("staff-perm-search").value = "";
+  document.getElementById("staff-perm-results").innerHTML = "";
+  document.getElementById("staff-perm-result").textContent = "";
+  document.getElementById("staff-perm-editor").style.display = "block";
+}
+
+document.getElementById("staff-perm-clear-btn").addEventListener("click", () => {
+  selectedStaffPerm = null;
+  document.getElementById("staff-perm-editor").style.display = "none";
+});
+
+document.getElementById("staff-perm-role-group").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  document.querySelectorAll("#staff-perm-role-group .chip").forEach(c => c.classList.remove("selected"));
+  chip.classList.add("selected");
+});
+
+document.getElementById("staff-perm-save-btn").addEventListener("click", async () => {
+  if (!selectedStaffPerm) return;
+  const roleChip = document.querySelector("#staff-perm-role-group .chip.selected");
+  if (!roleChip) { showToast("역할을 선택하세요 | Select a role"); return; }
+  const role = roleChip.dataset.role;
+  const homeroom = document.getElementById("staff-perm-homeroom-input").value.trim();
+  const resultEl = document.getElementById("staff-perm-result");
+  const btn = document.getElementById("staff-perm-save-btn");
+  btn.disabled = true;
+  try {
+    await setDoc(doc(db, "staff", selectedStaffPerm.email), { role, homeroom }, { merge: true });
+    selectedStaffPerm.role = role;
+    selectedStaffPerm.homeroom = homeroom;
+    const cacheEntry = staffRosterCache?.find(s => s.email === selectedStaffPerm.email);
+    if (cacheEntry) { cacheEntry.role = role; cacheEntry.homeroom = homeroom; }
+    resultEl.style.color = "";
+    resultEl.textContent = "저장됨 | Saved";
+  } catch (err) {
+    console.error(err);
+    resultEl.style.color = "var(--absence)";
+    resultEl.textContent = "저장 실패 | Save failed: " + err.message;
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // ===== 날짜 =====
