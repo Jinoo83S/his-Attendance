@@ -144,6 +144,19 @@
   .submit-btn:disabled{ background:#B9C4CE; cursor:not-allowed; }
   .submit-btn:active:not(:disabled){ background:var(--primary-dark); }
 
+  /* 관리자 화면 - 카드/버튼/여백을 전체적으로 촘촘하게 */
+  #view-admin .card{ padding:12px; margin-bottom:8px; }
+  #view-admin .field{ margin-bottom:0; }
+  #view-admin .field-label{ margin-bottom:5px; }
+  #view-admin p{ margin-bottom:6px !important; line-height:1.4 !important; }
+  #view-admin .submit-btn{
+    padding:8px; font-size:13.5px; border-radius:16px; margin-top:0;
+  }
+  #view-admin input[type=text]{ padding:8px 10px; font-size:13.5px; }
+  #view-admin .date-row{ gap:8px; }
+  #view-admin .date-row + p, #view-admin input + p{ margin-top:6px; }
+  #view-admin .clear-student{ font-size:12.5px; }
+
   .toast{
     position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px);
     background:#323232; color:#fff; padding:12px 20px; border-radius:8px; font-size:14px;
@@ -388,10 +401,10 @@
         <div class="card">
           <div class="field">
             <span class="field-label">동기화 | Sync</span>
-            <p id="last-sync-label" style="font-size:13px;color:var(--text-2);margin-bottom:10px;">확인 중... | Checking...</p>
+            <p id="last-sync-label" style="font-size:13px;color:var(--text-2);margin-bottom:6px;">확인 중... | Checking...</p>
             <button class="submit-btn" id="sync-quick-btn" type="button">동기화 | Sync</button>
             <button class="clear-student" id="reset-cache-btn" type="button" style="margin-top:8px;">이 기기 캐시 초기화(전체 재동기화) | Reset this device's cache</button>
-            <div id="pending-sync-list" style="margin-top:12px;"></div>
+            <div id="pending-sync-list" style="margin-top:8px;"></div>
           </div>
         </div>
 
@@ -418,7 +431,7 @@
               <span class="chevron" id="sync-accordion-chevron">▾</span>
             </div>
             <div id="sync-accordion-content" style="display:none;margin-top:10px;">
-              <p style="font-size:12px;color:var(--text-2);margin-bottom:10px;line-height:1.5;">
+              <p style="font-size:12px;color:var(--text-2);margin-bottom:6px;line-height:1.5;">
                 구글시트에 직접 데이터를 입력/수정한 뒤 "불러오기"를 누르면, 앱의 과거 기록이 시트 내용으로 통째로 교체됩니다.<br>
                 Edit data directly in the sheet, then "Load" replaces the app's imported records entirely with the sheet's current content.<br><br>
                 "동기화"는 반대로 앱에서 아직 시트로 안 나간 새 기록만 시트 맨 뒤에 추가합니다 (기존 시트 내용은 안 건드림).<br>
@@ -460,7 +473,7 @@
         <div class="card">
           <div class="field">
             <span class="field-label">학생/교사 관리 | Student & Staff Admin</span>
-            <p style="font-size:13px;margin-bottom:10px;">
+            <p style="font-size:13px;margin-bottom:6px;">
               조회/수정/일괄등록은 his-main 관리자 화면에서 진행합니다.<br>
               View, edit, and bulk-import in the his-main admin pages.
             </p>
@@ -484,8 +497,8 @@
             </p>
             <input type="text" id="staff-perm-search" placeholder="이름으로 검색 | Search by name">
             <div id="staff-perm-results"></div>
-            <div id="staff-perm-editor" style="display:none;margin-top:12px;">
-              <div class="selected-student" id="staff-perm-selected-box" style="margin-bottom:12px;">
+            <div id="staff-perm-editor" style="display:none;margin-top:8px;">
+              <div class="selected-student" id="staff-perm-selected-box" style="margin-bottom:8px;">
                 <div>
                   <div class="name" id="staff-perm-selected-name"></div>
                   <div class="sub" id="staff-perm-selected-email"></div>
@@ -493,13 +506,13 @@
                 <button class="clear-student" id="staff-perm-clear-btn">변경 | Change</button>
               </div>
               <span class="field-label">역할 | Role</span>
-              <div class="chip-group" id="staff-perm-role-group" style="margin-bottom:16px;">
+              <div class="chip-group" id="staff-perm-role-group" style="margin-bottom:10px;">
                 <div class="chip" data-role="teacher">교사 | Teacher</div>
                 <div class="chip" data-role="staff">직원 | Staff</div>
                 <div class="chip" data-role="admin">관리자 | Admin</div>
               </div>
               <span class="field-label">홈룸 | Homeroom</span>
-              <input type="text" id="staff-perm-homeroom-input" placeholder="예 | e.g. 8A (비우면 없음 | blank = none)" style="margin-bottom:12px;">
+              <input type="text" id="staff-perm-homeroom-input" placeholder="예 | e.g. 8A (비우면 없음 | blank = none)" style="margin-bottom:8px;">
               <button class="submit-btn" id="staff-perm-save-btn" type="button">저장 | Save</button>
               <div id="staff-perm-result" style="font-size:13px;margin-top:8px;"></div>
             </div>
@@ -509,7 +522,7 @@
         <div class="card">
           <div class="field">
             <span class="field-label">전체 출결 데이터 삭제 | Delete All Attendance Data</span>
-            <p style="font-size:12px;color:var(--absence);margin-bottom:10px;line-height:1.5;">
+            <p style="font-size:12px;color:var(--absence);margin-bottom:6px;line-height:1.5;">
               attendanceReports/attendanceDaily 전체를 삭제합니다. 구글시트 내용에는 영향 없습니다. 되돌릴 수 없습니다.<br>
               Deletes ALL attendanceReports/attendanceDaily in Firestore. Does not touch the sheet. Cannot be undone.
             </p>
