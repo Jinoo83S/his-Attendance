@@ -254,7 +254,10 @@
 
       <!-- 오늘 화면 (첫 화면) -->
       <div id="view-today" class="view active">
-        <div class="field-label" style="margin-bottom:10px;" id="today-date-label"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <span class="field-label" style="margin-bottom:0;" id="today-date-label"></span>
+          <button class="clear-student" id="today-refresh-btn" type="button">새로고침 | Refresh</button>
+        </div>
         <div id="today-list"></div>
       </div>
 
@@ -323,6 +326,9 @@
 
       <!-- 최근 기록 화면 -->
       <div id="view-recent" class="view">
+        <div style="text-align:right;margin-bottom:6px;">
+          <button class="clear-student" id="recent-refresh-btn" type="button">새로고침 | Refresh</button>
+        </div>
         <div class="chip-group" id="recent-mode-group" style="margin-bottom:12px;">
           <div class="chip selected" data-mode="list">목록 | List</div>
           <div class="chip" data-mode="month">월별 | Monthly</div>
@@ -1046,10 +1052,7 @@ document.getElementById("reset-cache-btn").addEventListener("click", async () =>
   btn.disabled = true;
   btn.textContent = "초기화 중... | Resetting...";
   try {
-    localStorage.removeItem(CACHE_KEY);
-    dataCache = { dataVersion: 0, lastFetchAt: null, reports: {}, daily: {} };
-    allReportsCache = [];
-    allDailyCache = [];
+    clearLocalCache();
     await bumpDataVersion(); // 다른 기기들도 다음 방문 때 전체 재동기화하도록
     showToast("캐시 초기화 완료 — 오늘/최근기록에서 다시 확인해주세요 | Cache reset — check Today/Recent again");
   } catch (err) {
@@ -1466,6 +1469,25 @@ async function syncCacheFromServer() {
 async function bumpDataVersion() {
   await setDoc(doc(db, "settings", "general"), { dataVersion: increment(1) }, { merge: true });
 }
+
+// 본인 기기의 로컬 캐시만 비움 — 권한 필요 없음, 아무나 자기 화면에서 써도 안전
+function clearLocalCache() {
+  localStorage.removeItem(CACHE_KEY);
+  dataCache = { dataVersion: 0, lastFetchAt: null, reports: {}, daily: {} };
+  allReportsCache = [];
+  allDailyCache = [];
+}
+
+document.getElementById("today-refresh-btn").addEventListener("click", async () => {
+  clearLocalCache();
+  await loadTodayList();
+  showToast("새로고침 완료 | Refreshed");
+});
+document.getElementById("recent-refresh-btn").addEventListener("click", async () => {
+  clearLocalCache();
+  await loadRecentRecords();
+  showToast("새로고침 완료 | Refreshed");
+});
 
 // ===== 오늘 화면 (학교 전체 — 본인 것만이 아님, 로컬 캐시 기반) =====
 async function loadTodayList() {
