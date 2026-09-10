@@ -376,12 +376,17 @@
 
         <div class="card">
           <div class="field">
-            <span class="field-label">최근 동기화 기록 | Recently Synced</span>
-            <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;">
-              전 교직원의 자동/수동 동기화 내역입니다 (최신순 최대 30건).<br>
-              Auto/manual sync history across all staff (latest 30).
-            </p>
-            <div id="sync-history-list"></div>
+            <div class="summary-row" id="sync-history-toggle">
+              <span class="field-label" style="margin-bottom:0;">최근 동기화 기록 | Recently Synced</span>
+              <span class="chevron" id="sync-history-chevron">▾</span>
+            </div>
+            <div id="sync-history-content" style="display:none;margin-top:10px;">
+              <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;">
+                전 교직원의 자동/수동 동기화 내역입니다 (최신순 최대 30건).<br>
+                Auto/manual sync history across all staff (latest 30).
+              </p>
+              <div id="sync-history-list"></div>
+            </div>
           </div>
         </div>
 
@@ -636,6 +641,15 @@ document.getElementById("sync-accordion-toggle").addEventListener("click", () =>
   const open = content.style.display !== "none";
   content.style.display = open ? "none" : "block";
   chevron.style.transform = open ? "" : "rotate(180deg)";
+});
+
+document.getElementById("sync-history-toggle").addEventListener("click", () => {
+  const content = document.getElementById("sync-history-content");
+  const chevron = document.getElementById("sync-history-chevron");
+  const open = content.style.display !== "none";
+  content.style.display = open ? "none" : "block";
+  chevron.style.transform = open ? "" : "rotate(180deg)";
+  if (!open) updateSyncHistoryList(); // 펼칠 때만 로드 (읽기 절감), 매번 최신으로 새로고침
 });
 
 document.getElementById("admin-year-save-btn").addEventListener("click", async () => {
@@ -974,7 +988,6 @@ async function updateLastSyncLabel() {
     labelEl.textContent = "동기화 상태 확인 실패 | Failed to check sync status";
   }
   updatePendingSyncList();
-  updateSyncHistoryList();
 }
 
 async function updatePendingSyncList() {
