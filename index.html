@@ -560,7 +560,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut
+  getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   initializeFirestore, doc, getDoc, setDoc, collection, query, where, orderBy, limit,
@@ -623,7 +623,7 @@ const gateErrorEl = document.getElementById("gate-error");
 
 document.getElementById("login-btn").addEventListener("click", () => {
   gateErrorEl.style.display = "none";
-  signInWithPopup(auth, provider).catch(err => {
+  signInWithRedirect(auth, provider).catch(err => {
     console.error(err);
     gateErrorEl.textContent = "로그인에 실패했습니다. 다시 시도해주세요. | Sign-in failed. Please try again.";
     gateErrorEl.style.display = "block";
@@ -631,6 +631,13 @@ document.getElementById("login-btn").addEventListener("click", () => {
 });
 document.getElementById("logout-btn").addEventListener("click", () => signOut(auth));
 document.getElementById("denied-logout-btn").addEventListener("click", () => signOut(auth));
+
+// 리디렉션으로 돌아온 직후 발생한 로그인 오류(팝업이 아니라 여기서 잡힘) 처리
+getRedirectResult(auth).catch(err => {
+  console.error(err);
+  gateErrorEl.textContent = "로그인에 실패했습니다. 다시 시도해주세요. | Sign-in failed. Please try again.";
+  gateErrorEl.style.display = "block";
+});
 
 onAuthStateChanged(auth, async (user) => {
   gateEl.style.display = "none";
