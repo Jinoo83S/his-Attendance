@@ -480,8 +480,8 @@
           <div class="field">
             <span class="field-label">교사 권한 관리 | Staff Permissions</span>
             <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;">
-              이 앱에서 role(교사/직원/관리자)과 홈룸만 빠르게 바꿉니다. 그 외 정보 수정은 위 "교사관리"에서.<br>
-              Quickly change role and homeroom here. Everything else is edited via "Staff" above.
+              역할, 홈룸, 출결서류 확인 권한을 빠르게 바꿉니다. 그 외 정보 수정은 위 "교사관리"에서.<br>
+              Quickly change role, homeroom, and attendance-document permission here.
             </p>
             <input type="text" id="staff-perm-search" placeholder="이름으로 검색 | Search by name">
             <div id="staff-perm-results"></div>
@@ -501,6 +501,10 @@
               </div>
               <span class="field-label">홈룸 | Homeroom</span>
               <input type="text" id="staff-perm-homeroom-input" placeholder="예 | e.g. 8A (비우면 없음 | blank = none)" style="margin-bottom:8px;">
+              <label style="display:flex;align-items:center;gap:8px;margin:2px 0 10px;font-size:13px;font-weight:600;">
+                <input type="checkbox" id="staff-perm-attendance-doc" style="width:18px;height:18px;accent-color:var(--primary);">
+                출결서류 확인·변경 권한 | Attendance document permission
+              </label>
               <button class="submit-btn" id="staff-perm-save-btn" type="button">저장 | Save</button>
               <div id="staff-perm-result" style="font-size:13px;margin-top:8px;"></div>
             </div>
@@ -767,6 +771,14 @@ document.getElementById("source-sheet-open-btn").addEventListener("click", () =>
 });
 
 document.getElementById("report-fab").addEventListener("click", () => {
+  // 이미 읽은 NEIS 포함 학생명단을 보고서와 공유하여 재진입 로딩을 줄인다.
+  if (CURRENT_YEAR && studentRoster.length) {
+    try {
+      localStorage.setItem("hisAttendanceReportRoster_v2", JSON.stringify({
+        year: String(CURRENT_YEAR), at: Date.now(), data: studentRoster
+      }));
+    } catch (_) {}
+  }
   window.location.href = "report.html";
 });
 
@@ -1056,7 +1068,7 @@ document.getElementById("delete-all-attendance-btn").addEventListener("click", a
   }
 });
 
-const ROSTER_CACHE_KEY = "hisStudentRosterCache_v1";
+const ROSTER_CACHE_KEY = "hisStudentRosterCache_v2";
 const ROSTER_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12시간 — admin-students.html은 별도 앱이라 변경 신호를 못 받으므로 시간 기반
 
 function loadRosterCache() {
@@ -1086,7 +1098,8 @@ async function loadStudentRoster() {
     if (!s.name) return;
     studentRoster.push({
       email: s.email, name: s.name, engName: s.engName || "",
-      grade: s.grade || "", cls: s.cls || "", num: s.num || "", schoolLevel: s.schoolLevel || ""
+      grade: s.grade || "", cls: s.cls || "", num: s.num || "", schoolLevel: s.schoolLevel || "",
+      neisClassGroup: s.neisClassGroup || "", neisCls: s.neisCls || "", neisNum: s.neisNum || ""
     });
   });
   populateFilterChips();
@@ -1240,6 +1253,7 @@ function selectStaffForEdit(s) {
   document.getElementById("staff-perm-selected-name").textContent = name;
   document.getElementById("staff-perm-selected-email").textContent = s.email;
   document.getElementById("staff-perm-homeroom-input").value = s.homeroom || "";
+  document.getElementById("staff-perm-attendance-doc").checked = s.canManageAttendanceDocuments === true;
   document.querySelectorAll("#staff-perm-role-group .chip").forEach(c =>
     c.classList.toggle("selected", c.dataset.role === s.role)
   );
@@ -1267,15 +1281,21 @@ document.getElementById("staff-perm-save-btn").addEventListener("click", async (
   if (!roleChip) { showToast("역할을 선택하세요 | Select a role"); return; }
   const role = roleChip.dataset.role;
   const homeroom = document.getElementById("staff-perm-homeroom-input").value.trim();
+  const canManageAttendanceDocuments = document.getElementById("staff-perm-attendance-doc").checked;
   const resultEl = document.getElementById("staff-perm-result");
   const btn = document.getElementById("staff-perm-save-btn");
   btn.disabled = true;
   try {
-    await setDoc(doc(db, "staff", selectedStaffPerm.email), { role, homeroom }, { merge: true });
+    await setDoc(doc(db, "staff", selectedStaffPerm.email), { role, homeroom, canManageAttendanceDocuments }, { merge: true });
     selectedStaffPerm.role = role;
     selectedStaffPerm.homeroom = homeroom;
+    selectedStaffPerm.canManageAttendanceDocuments = canManageAttendanceDocuments;
     const cacheEntry = staffRosterCache?.find(s => s.email === selectedStaffPerm.email);
-    if (cacheEntry) { cacheEntry.role = role; cacheEntry.homeroom = homeroom; }
+    if (cacheEntry) {
+      cacheEntry.role = role;
+      cacheEntry.homeroom = homeroom;
+      cacheEntry.canManageAttendanceDocuments = canManageAttendanceDocuments;
+    }
     resultEl.style.color = "";
     resultEl.textContent = "저장됨 | Saved";
   } catch (err) {
