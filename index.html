@@ -432,12 +432,23 @@
             </div>
             <div id="sync-accordion-content" style="display:none;margin-top:10px;">
               <p style="font-size:12px;color:var(--text-2);margin-bottom:6px;line-height:1.5;">
-                구글시트에 직접 데이터를 입력/수정한 뒤 "불러오기"를 누르면, 앱의 과거 기록이 시트 내용으로 통째로 교체됩니다.<br>
-                Edit data directly in the sheet, then "Load" replaces the app's imported records entirely with the sheet's current content.<br><br>
+                기존 AppSheet 출결을 날짜 범위로 검사한 뒤 Firebase로 가져옵니다. 미리보기는 데이터를 변경하지 않습니다.<br>
+                Preview legacy AppSheet attendance for a date range before importing it into Firebase.<br><br>
                 "동기화"는 반대로 앱에서 아직 시트로 안 나간 새 기록만 시트 맨 뒤에 추가합니다 (기존 시트 내용은 안 건드림).<br>
                 "Sync" appends only records not yet sent to the sheet, at the end (existing sheet rows are untouched).
               </p>
-              <button class="submit-btn" id="load-from-sheet-btn" type="button">구글시트에서 불러오기 | Load from Sheet</button>
+              <div class="date-row" style="margin-bottom:8px;">
+                <div class="field" style="flex:1;margin-bottom:0;">
+                  <span class="field-label">시작일 | From</span>
+                  <input type="date" id="legacy-import-start">
+                </div>
+                <div class="field" style="flex:1;margin-bottom:0;">
+                  <span class="field-label">종료일 | To</span>
+                  <input type="date" id="legacy-import-end">
+                </div>
+              </div>
+              <button class="submit-btn" id="load-from-sheet-btn" type="button">가져오기 미리보기 | Preview Import</button>
+              <button class="submit-btn" id="import-preview-btn" type="button" disabled style="margin-top:8px;background:var(--detail-approved);">확정 가져오기 | Import Reviewed Data</button>
               <button class="submit-btn" id="sync-to-sheet-btn" type="button" style="margin-top:8px;background:var(--text-2);">동기화 | Sync</button>
               <div id="sheet-sync-result" style="font-size:13px;margin-top:10px;white-space:pre-line;"></div>
             </div>
@@ -581,6 +592,7 @@ const ALLOWED_DOMAIN = "his.sc.kr";
 let CURRENT_YEAR = null; // settings/general.currentYear 에서 로드 (his-main 전체와 동일 기준)
 let REPORT_SHEET_URL = ""; // settings/general.reportUrl — 오늘/최근기록의 외부링크 버튼용
 let SOURCE_SHEET_URL = ""; // settings/general.sourceSheetUrl — 관리자 화면의 원본 시트 바로가기용
+let legacyImportPreview = null;
 
 // Apps Script 배포 완료 — sheet-sync-apps-script.gs 참고
 const SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbxDpd3AQMa7uvSPO5ebUS24sMrkvxR9_L4gMMqxPvvvH54eqW97ELFL6JRmspnrG1Hc/exec";
@@ -695,6 +707,7 @@ onAuthStateChanged(auth, async (user) => {
   CURRENT_YEAR = settingsSnap.exists() ? (settingsSnap.data().currentYear || "") : "";
   REPORT_SHEET_URL = settingsSnap.exists() ? (settingsSnap.data().reportUrl || "") : "";
   SOURCE_SHEET_URL = settingsSnap.exists() ? (settingsSnap.data().sourceSheetUrl || "") : "";
+  setLegacyImportDefaults();
   if (!CURRENT_YEAR) {
     showToast(myStaff.role === "admin"
       ? "현재 학년도 미설정 — 관리자 버튼에서 설정하세요 | Year not set — set it via the Admin button"
@@ -788,6 +801,14 @@ document.getElementById("source-sheet-open-btn").addEventListener("click", () =>
   window.open(SOURCE_SHEET_URL, "_blank", "noopener");
 });
 
+["legacy-import-start", "legacy-import-end"].forEach(id => {
+  document.getElementById(id).addEventListener("change", () => {
+    legacyImportPreview = null;
+    document.getElementById("import-preview-btn").disabled = true;
+    document.getElementById("sheet-sync-result").textContent = "날짜 범위가 변경되었습니다. 미리보기를 다시 실행하세요.";
+  });
+});
+
 document.getElementById("report-fab").addEventListener("click", () => {
   if (!REPORT_SHEET_URL) {
     showToast("관리자가 링크를 아직 설정하지 않았습니다 | Admin hasn't set this link yet");
@@ -797,32 +818,76 @@ document.getElementById("report-fab").addEventListener("click", () => {
 });
 
 // ===== 구글시트 ↔ 앱 (전체 불러오기/저장하기) =====
-function formatDotDate(iso) {
-  const [y, m, d] = iso.split("-");
-  return `${y}.${m}.${d}.`;
-}
 function buildSyncRow(r) {
-  const dates = dateRange(r.startDate, r.endDate);
   const endPlus1 = new Date(r.endDate + "T00:00:00");
   endPlus1.setDate(endPlus1.getDate() + 1);
   const endPlus1Str = toLocalDateStr(endPlus1);
+  const periods = (r.periods || []).map(String);
+  const selectedPeriods = new Set(periods);
+  const periodFlags = Array.from({ length: 8 }, (_, period) => selectedPeriods.has(String(period)) ? 1 : 0);
+  const gradeClass = `${r.grade || ""}${r.cls || ""}`;
+  const nameA = `${gradeClass}${r.studentName || ""}${r.studentEngName || ""}`;
 
-  const row = [
+  return [
     r.startDate, r.endDate, endPlus1Str,
     r.grade, r.cls,
     "", // 담임 (미구현 — 백로그)
     r.studentName, r.studentEngName || "",
-    r.category, r.detail, r.reason,
-    r.attendanceType, r.reason,
-    (r.periods || []).join(" , "),
-    "", // 서류 (미구현 — 백로그)
-    formatDotDate(r.startDate), formatDotDate(r.endDate), String(dates.length)
+    CATEGORY_LABEL[r.category] || r.category,
+    DETAIL_LABEL[r.detail] || r.detail,
+    r.reason,
+    "", // 기안/Draft — 후속 구현
+    periods.join(" , "),
+    ...periodFlags,
+    nameA,
+    gradeClass,
+    false // 서류 — 담당자 입력 기능은 후속 구현
   ];
-  dates.forEach(d => row.push(formatDotDate(d)));
-  return row;
 }
 function sortByStartDate(list) {
   return [...list].sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
+}
+
+function setLegacyImportDefaults() {
+  const year = /^\d{4}$/.test(String(CURRENT_YEAR || "")) ? String(CURRENT_YEAR) : String(new Date().getFullYear());
+  const startEl = document.getElementById("legacy-import-start");
+  const endEl = document.getElementById("legacy-import-end");
+  if (startEl && !startEl.value) startEl.value = `${year}-03-01`;
+  if (endEl && !endEl.value) endEl.value = `${year}-07-31`;
+}
+
+function monthKeysBetween(startDate, endDate) {
+  const keys = [];
+  const cursor = new Date(startDate.slice(0, 7) + "-01T00:00:00");
+  const end = new Date(endDate.slice(0, 7) + "-01T00:00:00");
+  while (cursor <= end) {
+    keys.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return keys;
+}
+
+function legacyFingerprint(r) {
+  return [
+    r.startDate, r.endDate, r.studentName, r.studentEngName,
+    r.grade, r.cls, r.category, r.detail, r.reason,
+    (r.periods || []).join(",")
+  ].map(v => String(v || "").trim()).join("\u001f");
+}
+
+function resolveLegacyStudent(r) {
+  const exact = studentRoster.filter(s =>
+    s.name === r.studentName &&
+    (!r.grade || String(s.grade) === String(r.grade)) &&
+    (!r.cls || String(s.cls) === String(r.cls))
+  );
+  if (exact.length === 1) return { status: "matched", student: exact[0] };
+  if (exact.length > 1) return { status: "ambiguous", student: null };
+
+  const byName = studentRoster.filter(s => s.name === r.studentName);
+  if (byName.length === 1) return { status: "matchedByName", student: byName[0] };
+  if (byName.length > 1) return { status: "ambiguous", student: null };
+  return { status: "unmatched", student: null };
 }
 
 // 시트에서 읽어온 값 정규화 (Apps Script Date 객체는 ISO 문자열로 직렬화되어 옴)
@@ -858,9 +923,13 @@ function parseSheetRow(row) {
   }
 
   const endDate = extractDate(get(1)) || startDate;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate) || endDate < startDate) {
+    return { ok: false, raw: row.slice(0, 10), reason: "invalid date range" };
+  }
   const categoryShort = normText(get(8));
   const detailShort = normText(get(9));
-  const periodsRaw = String(get(13) || "").trim();
+  // AppSheet 원본 기준 M열이 교시선택이다. N~U는 달력/표시용 교시 플래그다.
+  const periodsRaw = String(get(12) || "").trim();
   return {
     ok: true,
     data: {
@@ -871,7 +940,7 @@ function parseSheetRow(row) {
       studentEngName: String(get(7) || "").trim(),
       category: categoryShort,
       detail: detailShort,
-      reason: String(get(12) || get(10) || "").trim(),
+      reason: String(get(10) || get(11) || "").trim(),
       attendanceType: (categoryShort && detailShort) ? (detailShort + categoryShort) : normText(get(11)),
       periods: periodsRaw ? periodsRaw.split(",").map(p => p.trim()).filter(Boolean) : []
     }
@@ -897,118 +966,221 @@ async function deleteInChunks(refs, onProgress) {
   return done;
 }
 
-// ----- 구글시트에서 불러오기 (시트 → 앱, 과거 가져오기 기록 전체 교체) -----
+// ----- 구글시트에서 불러오기 (시트 → 앱, 검증 후 추가/갱신) -----
 document.getElementById("load-from-sheet-btn").addEventListener("click", async () => {
   const btn = document.getElementById("load-from-sheet-btn");
+  const importBtn = document.getElementById("import-preview-btn");
   const resultEl = document.getElementById("sheet-sync-result");
+  const rangeStart = document.getElementById("legacy-import-start").value;
+  const rangeEnd = document.getElementById("legacy-import-end").value;
   if (!SHEET_SYNC_URL) { showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set"); return; }
-  if (!confirm("앱의 기존 '가져오기' 기록을 전부 지우고 시트 내용으로 교체합니다. 계속할까요?\nThis replaces all existing imported records with the sheet's current content. Continue?")) return;
+  if (!rangeStart || !rangeEnd || rangeEnd < rangeStart) {
+    showToast("가져올 날짜 범위를 확인하세요 | Check the import date range");
+    return;
+  }
 
+  legacyImportPreview = null;
+  importBtn.disabled = true;
   btn.disabled = true;
-  btn.textContent = "시트 읽는 중... | Reading sheet...";
+  btn.textContent = "시트 검사 중... | Checking sheet...";
   resultEl.textContent = "";
   try {
     const token = await getSheetSyncToken();
-    const res = await fetch(SHEET_SYNC_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ token, action: "load" })
-    });
+    const [res, existingSnap] = await Promise.all([
+      fetch(SHEET_SYNC_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify({ token, action: "load" })
+      }),
+      getDocs(query(collection(db, "attendanceReports"), where("importedFromLegacy", "==", true)))
+    ]);
     const result = await res.json();
     if (!result.ok) throw new Error(result.error || "unknown error");
 
-    const parseResults = result.rows.map((row, idx) => ({ idx, res: parseSheetRow(row) }));
-    const parsedRows = parseResults.filter(x => x.res.ok && !x.res.skip).map(x => x.res.data);
-    const invalidRows = parseResults.filter(x => !x.res.ok);
-
-    btn.textContent = "기존 기록 삭제 중... | Removing old imported records...";
-    const oldSnap = await getDocs(query(collection(db, "attendanceReports"), where("importedFromLegacy", "==", true)));
-    const oldReportIds = [];
-    oldSnap.forEach(d => oldReportIds.push(d.id));
-    const oldDailyRefs = [];
-    for (const rid of oldReportIds) {
-      const dSnap = await getDocs(query(collection(db, "attendanceDaily"), where("reportId", "==", rid)));
-      dSnap.forEach(dd => oldDailyRefs.push(doc(db, "attendanceDaily", dd.id)));
-    }
-    await deleteInChunks(oldReportIds.map(id => doc(db, "attendanceReports", id)), (d, t) => {
-      btn.textContent = `기존 기록 삭제 중... ${d}/${t} | Removing... ${d}/${t}`;
-    });
-    await deleteInChunks(oldDailyRefs, (d, t) => {
-      btn.textContent = `기존 일자기록 삭제 중... ${d}/${t} | Removing daily... ${d}/${t}`;
+    const existingFingerprints = new Set();
+    const existingById = new Map();
+    existingSnap.forEach(snap => {
+      const data = snap.data();
+      const fingerprint = data.legacyFingerprint || legacyFingerprint(data);
+      existingFingerprints.add(fingerprint);
+      existingById.set(snap.id, fingerprint);
     });
 
-    btn.textContent = `새 기록 저장 중... 0/${parsedRows.length} | Saving... 0/${parsedRows.length}`;
-    let matched = 0, unmatched = 0, opsInBatch = 0, written = 0;
-    const unmatchedDetails = [];
-    let batch = writeBatch(db);
+    const invalidRows = [];
+    const outsideRows = [];
+    const candidates = [];
+    result.rows.forEach((row, idx) => {
+      const sheetRow = idx + 2;
+      const parsed = parseSheetRow(row);
+      if (parsed.skip) return;
+      if (!parsed.ok) {
+        invalidRows.push({ sheetRow, ...parsed });
+        return;
+      }
+      const r = parsed.data;
+      if (r.startDate > rangeEnd || r.endDate < rangeStart) {
+        outsideRows.push(sheetRow);
+        return;
+      }
+      candidates.push({ sheetRow, data: r });
+    });
 
-    for (const r of parsedRows) {
-      const student = studentRoster.find(s =>
-        s.name === r.studentName && (!r.grade || s.grade === r.grade) && (!r.cls || s.cls === r.cls)
-      ) || studentRoster.find(s => s.name === r.studentName);
-      if (student) matched++; else {
-        unmatched++;
-        unmatchedDetails.push(`${r.studentName} (${r.grade}${r.cls || ""}, ${r.startDate})`);
+    const year = String(CURRENT_YEAR || rangeStart.slice(0, 4));
+    const reviewed = [];
+    const unmatched = [];
+    const ambiguous = [];
+    const duplicate = [];
+    const conflicts = [];
+    const nameOnlyMatches = [];
+    let exactMatches = 0;
+    let nameMatches = 0;
+    let estimatedWrites = 0;
+
+    candidates.forEach(item => {
+      const match = resolveLegacyStudent(item.data);
+      const fingerprint = legacyFingerprint(item.data);
+      const id = `legacy_${year}_${String(item.sheetRow).padStart(6, "0")}`;
+      if (match.status === "unmatched") {
+        unmatched.push(item);
+        return;
+      }
+      if (match.status === "ambiguous") {
+        ambiguous.push(item);
+        return;
+      }
+      if (match.status === "matched") exactMatches++;
+      else {
+        nameMatches++;
+        nameOnlyMatches.push(item);
       }
 
-      const reportRef = doc(collection(db, "attendanceReports"));
+      if (existingFingerprints.has(fingerprint)) {
+        duplicate.push(item);
+        return;
+      }
+      if (existingById.has(id) && existingById.get(id) !== fingerprint) {
+        conflicts.push(item);
+        return;
+      }
+      const dates = dateRange(item.data.startDate, item.data.endDate);
+      estimatedWrites += 1 + dates.length;
+      reviewed.push({ ...item, id, fingerprint, student: match.student, dates });
+    });
+
+    const blocked = invalidRows.length + unmatched.length + ambiguous.length + conflicts.length;
+    legacyImportPreview = {
+      year, rangeStart, rangeEnd, records: reviewed,
+      sourceRows: result.rows.length,
+      blocked
+    };
+    importBtn.disabled = blocked > 0 || reviewed.length === 0;
+
+    const issueLines = [];
+    if (invalidRows.length) issueLines.push(`무효 행 ${invalidRows.length}건: ${invalidRows.slice(0, 20).map(x => x.sheetRow).join(", ")}`);
+    if (unmatched.length) issueLines.push(`학생 매칭 실패 ${unmatched.length}건: ${unmatched.slice(0, 20).map(x => `${x.data.studentName}(행 ${x.sheetRow})`).join(", ")}`);
+    if (ambiguous.length) issueLines.push(`동명이인 확인 필요 ${ambiguous.length}건: ${ambiguous.slice(0, 20).map(x => `${x.data.studentName}(행 ${x.sheetRow})`).join(", ")}`);
+    if (conflicts.length) issueLines.push(`기존 행 ID 충돌 ${conflicts.length}건: ${conflicts.slice(0, 20).map(x => x.sheetRow).join(", ")}`);
+
+    resultEl.textContent =
+      `미리보기 완료 (${rangeStart} ~ ${rangeEnd})\n` +
+      `시트 데이터 ${result.rows.length}행 / 범위 내 ${candidates.length}건 / 범위 밖 ${outsideRows.length}건\n` +
+      `정확 매칭 ${exactMatches}건 / 이름 매칭 ${nameMatches}건 / 기존 중복 ${duplicate.length}건\n` +
+      `가져올 기록 ${reviewed.length}건 / 예상 Firebase 쓰기 ${estimatedWrites}건\n` +
+      (nameOnlyMatches.length
+        ? `이름으로만 매칭: ${nameOnlyMatches.slice(0, 20).map(x => `${x.data.studentName}(행 ${x.sheetRow})`).join(", ")}\n`
+        : "") +
+      (blocked
+        ? `\n문제를 해결한 뒤 다시 미리보기해야 합니다.\n${issueLines.join("\n")}`
+        : "\n검증을 통과했습니다. '확정 가져오기'를 누르면 기존 기록을 삭제하지 않고 추가합니다.");
+  } catch (err) {
+    console.error(err);
+    resultEl.textContent = "미리보기 실패 | Preview failed: " + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "가져오기 미리보기 | Preview Import";
+  }
+});
+
+document.getElementById("import-preview-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("import-preview-btn");
+  const previewBtn = document.getElementById("load-from-sheet-btn");
+  const resultEl = document.getElementById("sheet-sync-result");
+  const preview = legacyImportPreview;
+  if (!preview || preview.blocked || !preview.records.length) {
+    showToast("먼저 오류 없는 미리보기를 실행하세요 | Run a clean preview first");
+    return;
+  }
+
+  btn.disabled = true;
+  previewBtn.disabled = true;
+  let batch = writeBatch(db);
+  let opsInBatch = 0;
+  let written = 0;
+  try {
+    for (const item of preview.records) {
+      const r = item.data;
+      const student = item.student;
+      const recordOps = 1 + item.dates.length;
+      if (recordOps > 400) throw new Error(`행 ${item.sheetRow}: 출결 기간이 너무 깁니다 (${item.dates.length}일)`);
+      if (opsInBatch > 0 && opsInBatch + recordOps > 400) {
+        await batch.commit();
+        batch = writeBatch(db);
+        opsInBatch = 0;
+      }
+      const reportRef = doc(db, "attendanceReports", item.id);
       const reportData = {
-        studentEmail: student ? student.email : "",
+        academicYear: preview.year,
+        monthKeys: monthKeysBetween(r.startDate, r.endDate),
+        studentEmail: student.email || "",
         studentName: r.studentName,
-        studentEngName: r.studentEngName || (student ? student.engName : ""),
-        grade: r.grade || (student ? student.grade : ""),
-        cls: r.cls || (student ? student.cls : ""),
+        studentEngName: r.studentEngName || student.engName || "",
+        grade: r.grade || student.grade || "",
+        cls: r.cls || student.cls || "",
         startDate: r.startDate, endDate: r.endDate,
         category: r.category, detail: r.detail, reason: r.reason,
         periods: r.periods, attendanceType: r.attendanceType,
         createdBy: myStaff.email, createdByName: myStaff.name,
-        createdAt: serverTimestamp(),
+        createdAt: serverTimestamp(), migratedAt: serverTimestamp(),
         importedFromLegacy: true,
-        synced: true, syncedAt: serverTimestamp() // 이미 시트에서 온 데이터이므로 재전송 대상 아님
+        legacySource: "appsheet-sheet",
+        legacySourceRow: item.sheetRow,
+        legacyFingerprint: item.fingerprint,
+        synced: true, syncedAt: serverTimestamp()
       };
       batch.set(reportRef, reportData);
-      opsInBatch++; written++;
+      opsInBatch++;
 
-      dateRange(r.startDate, r.endDate).forEach(dateStr => {
-        const dailyRef = doc(db, "attendanceDaily", `${reportRef.id}_${dateStr}`);
-        batch.set(dailyRef, {
-          reportId: reportRef.id, date: dateStr,
-          studentEmail: reportData.studentEmail, studentName: r.studentName,
+      for (const dateStr of item.dates) {
+        batch.set(doc(db, "attendanceDaily", `${item.id}_${dateStr}`), {
+          reportId: item.id, date: dateStr,
+          academicYear: preview.year,
+          monthKey: dateStr.slice(0, 7),
+          studentEmail: reportData.studentEmail, studentName: reportData.studentName,
           studentEngName: reportData.studentEngName,
           grade: reportData.grade, cls: reportData.cls,
           category: r.category, detail: r.detail, reason: r.reason,
           periods: r.periods, attendanceType: r.attendanceType,
           createdBy: myStaff.email, createdByName: myStaff.name,
-          createdAt: serverTimestamp()
+          createdAt: serverTimestamp(), importedFromLegacy: true
         });
         opsInBatch++;
-      });
-
-      if (opsInBatch >= 400) {
-        await batch.commit();
-        batch = writeBatch(db);
-        opsInBatch = 0;
-        btn.textContent = `새 기록 저장 중... ${written}/${parsedRows.length} | Saving... ${written}/${parsedRows.length}`;
       }
+      written++;
+      btn.textContent = `가져오는 중... ${written}/${preview.records.length} | Importing...`;
     }
     if (opsInBatch > 0) await batch.commit();
     await bumpDataVersion();
-
     resultEl.textContent =
-      `불러오기 완료: ${written}건 (학생 매칭 ${matched} / 실패 ${unmatched})\n` +
-      `Load done: ${written} rows (matched ${matched} / unmatched ${unmatched})` +
-      (unmatched > 0 ? `\n매칭 실패 | Unmatched:\n${unmatchedDetails.join("\n")}` : "") +
-      (invalidRows.length > 0
-        ? `\n\n무시된 무효 행 ${invalidRows.length}건 (시트 기준 ${invalidRows.map(x => x.idx + 2).join(",")}행) — 날짜 형식이 이상하거나 헤더가 잘못 섞여 있을 수 있습니다.\n` +
-          `Skipped ${invalidRows.length} invalid row(s) (sheet row ${invalidRows.map(x => x.idx + 2).join(",")}) — check date format or stray header text.\n` +
-          invalidRows.map(x => `행 ${x.idx + 2}: [${x.res.raw.join(" | ")}]`).join("\n")
-        : "");
+      `가져오기 완료: ${written}건 (${preview.rangeStart} ~ ${preview.rangeEnd})\n` +
+      `기존 기록은 삭제하지 않았습니다. 같은 시트 행은 다시 실행해도 같은 ID로 저장됩니다.`;
+    legacyImportPreview = null;
   } catch (err) {
     console.error(err);
-    resultEl.textContent = "불러오기 실패 | Load failed: " + err.message;
+    resultEl.textContent = `가져오기 중단: ${written}/${preview.records.length}건 처리\n${err.message}\n다시 미리보기하면 이미 저장된 항목은 중복으로 제외됩니다.`;
   } finally {
-    btn.disabled = false;
-    btn.textContent = "구글시트에서 불러오기 | Load from Sheet";
+    btn.disabled = true;
+    btn.textContent = "확정 가져오기 | Import Reviewed Data";
+    previewBtn.disabled = false;
   }
 });
 
@@ -1527,6 +1699,8 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
     const reportRef = doc(collection(db, "attendanceReports"));
     const batch = writeBatch(db);
     const reportData = {
+      academicYear: String(CURRENT_YEAR || startDate.slice(0, 4)),
+      monthKeys: monthKeysBetween(startDate, endDate),
       studentEmail: selectedStudent.email,
       studentName: selectedStudent.name,
       studentEngName: selectedStudent.engName || "",
@@ -1550,6 +1724,8 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
       const dailyRef = doc(db, "attendanceDaily", `${reportRef.id}_${dateStr}`);
       batch.set(dailyRef, {
         reportId: reportRef.id, date: dateStr,
+        academicYear: String(CURRENT_YEAR || dateStr.slice(0, 4)),
+        monthKey: dateStr.slice(0, 7),
         studentEmail: selectedStudent.email, studentName: selectedStudent.name,
         studentEngName: selectedStudent.engName || "",
         grade: selectedStudent.grade, cls: selectedStudent.cls,
