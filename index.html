@@ -928,8 +928,16 @@ function parseSheetRow(row) {
   }
   const categoryShort = normText(get(8));
   const detailShort = normText(get(9));
-  // AppSheet 원본 기준 M열이 교시선택이다. N~U는 달력/표시용 교시 플래그다.
-  const periodsRaw = String(get(12) || "").trim();
+  // 연결 대상이 AppSheet 원본(A:X)인지 계산된 출결_Load인지 행 값으로 판별한다.
+  // 원본: K 사유, L 기안, M 교시선택
+  // 출결_Load: M 출결구분, N 사유, O 교시선택
+  const columnM = normText(get(12));
+  const isCalculatedLoad = /^(출석인정|질병|미인정|기타)(결석|지각|조퇴|결과)$/.test(columnM);
+  const periodsRaw = String(isCalculatedLoad ? get(14) : get(12) || "").trim();
+  const reason = String(isCalculatedLoad ? (get(13) || get(10) || get(11)) : (get(10) || get(11)) || "").trim();
+  const attendanceType = isCalculatedLoad
+    ? columnM
+    : ((categoryShort && detailShort) ? (detailShort + categoryShort) : normText(get(11)));
   return {
     ok: true,
     data: {
@@ -940,8 +948,8 @@ function parseSheetRow(row) {
       studentEngName: String(get(7) || "").trim(),
       category: categoryShort,
       detail: detailShort,
-      reason: String(get(10) || get(11) || "").trim(),
-      attendanceType: (categoryShort && detailShort) ? (detailShort + categoryShort) : normText(get(11)),
+      reason,
+      attendanceType,
       periods: periodsRaw ? periodsRaw.split(",").map(p => p.trim()).filter(Boolean) : []
     }
   };
@@ -1030,7 +1038,7 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
     const unmatched = [];
     const ambiguous = [];
     const duplicate = [];
-    const conflicts = [];
+    const updates = [];
     const nameOnlyMatches = [];
     let exactMatches = 0;
     let nameMatches = 0;
@@ -1054,24 +1062,28 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
         nameOnlyMatches.push(item);
       }
 
-      if (existingFingerprints.has(fingerprint)) {
+      const existingIdFingerprint = existingById.get(id);
+      if (existingIdFingerprint === fingerprint || (!existingIdFingerprint && existingFingerprints.has(fingerprint))) {
         duplicate.push(item);
         return;
       }
-      if (existingById.has(id) && existingById.get(id) !== fingerprint) {
-        conflicts.push(item);
-        return;
+      let operation = "create";
+      if (existingIdFingerprint && existingIdFingerprint !== fingerprint) {
+        operation = "update";
+        updates.push(item);
       }
       const dates = dateRange(item.data.startDate, item.data.endDate);
       estimatedWrites += 1 + dates.length;
-      reviewed.push({ ...item, id, fingerprint, student: match.student, dates });
+      reviewed.push({ ...item, id, fingerprint, student: match.student, dates, operation });
     });
 
-    const blocked = invalidRows.length + unmatched.length + ambiguous.length + conflicts.length;
+    const blocked = invalidRows.length + unmatched.length + ambiguous.length;
     legacyImportPreview = {
       year, rangeStart, rangeEnd, records: reviewed,
       sourceRows: result.rows.length,
-      blocked
+      blocked,
+      createCount: reviewed.length - updates.length,
+      updateCount: updates.length
     };
     importBtn.disabled = blocked > 0 || reviewed.length === 0;
 
@@ -1079,13 +1091,11 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
     if (invalidRows.length) issueLines.push(`무효 행 ${invalidRows.length}건: ${invalidRows.slice(0, 20).map(x => x.sheetRow).join(", ")}`);
     if (unmatched.length) issueLines.push(`학생 매칭 실패 ${unmatched.length}건: ${unmatched.slice(0, 20).map(x => `${x.data.studentName}(행 ${x.sheetRow})`).join(", ")}`);
     if (ambiguous.length) issueLines.push(`동명이인 확인 필요 ${ambiguous.length}건: ${ambiguous.slice(0, 20).map(x => `${x.data.studentName}(행 ${x.sheetRow})`).join(", ")}`);
-    if (conflicts.length) issueLines.push(`기존 행 ID 충돌 ${conflicts.length}건: ${conflicts.slice(0, 20).map(x => x.sheetRow).join(", ")}`);
-
     resultEl.textContent =
       `미리보기 완료 (${rangeStart} ~ ${rangeEnd})\n` +
       `시트 데이터 ${result.rows.length}행 / 범위 내 ${candidates.length}건 / 범위 밖 ${outsideRows.length}건\n` +
       `정확 매칭 ${exactMatches}건 / 이름 매칭 ${nameMatches}건 / 기존 중복 ${duplicate.length}건\n` +
-      `가져올 기록 ${reviewed.length}건 / 예상 Firebase 쓰기 ${estimatedWrites}건\n` +
+      `신규 ${reviewed.length - updates.length}건 / 기존 자료 수정 ${updates.length}건 / 예상 Firebase 쓰기 ${estimatedWrites}건\n` +
       (nameOnlyMatches.length
         ? `이름으로만 매칭: ${nameOnlyMatches.slice(0, 20).map(x => `${x.data.studentName}(행 ${x.sheetRow})`).join(", ")}\n`
         : "") +
@@ -1171,7 +1181,7 @@ document.getElementById("import-preview-btn").addEventListener("click", async ()
     if (opsInBatch > 0) await batch.commit();
     await bumpDataVersion();
     resultEl.textContent =
-      `가져오기 완료: ${written}건 (${preview.rangeStart} ~ ${preview.rangeEnd})\n` +
+      `가져오기 완료: 신규 ${preview.createCount}건 / 수정 ${preview.updateCount}건 (${preview.rangeStart} ~ ${preview.rangeEnd})\n` +
       `기존 기록은 삭제하지 않았습니다. 같은 시트 행은 다시 실행해도 같은 ID로 저장됩니다.`;
     legacyImportPreview = null;
   } catch (err) {
