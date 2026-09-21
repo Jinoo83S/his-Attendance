@@ -584,7 +584,7 @@ let SOURCE_SHEET_URL = ""; // settings/general.sourceSheetUrl — 관리자 화�
 
 // Apps Script 배포 완료 — sheet-sync-apps-script.gs 참고
 const SHEET_SYNC_URL = "https://script.google.com/macros/s/AKfycbxDpd3AQMa7uvSPO5ebUS24sMrkvxR9_L4gMMqxPvvvH54eqW97ELFL6JRmspnrG1Hc/exec";
-const SHEET_SYNC_TOKEN = "his_attendance_token";
+let sheetSyncToken = ""; // adminSettings/attendanceSync에서 관리자만 읽음
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -597,6 +597,21 @@ const DETAIL_LABEL = { "출석인정":"출석 인정 | School Approved", "질병
 const CATEGORY_COLOR = { "결석":"var(--absence)", "지각":"var(--late)", "조퇴":"var(--early)", "결과":"var(--classabsent)" };
 const DETAIL_COLOR = { "출석인정":"var(--detail-approved)", "질병":"var(--detail-sick)", "미인정":"var(--detail-unexcused)", "기타":"var(--detail-other)" };
 const PERIOD_REQUIRED_CATEGORIES = ["지각","조퇴","결과"];
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[ch]);
+}
+
+async function getSheetSyncToken() {
+  if (myStaff?.role !== "admin") throw new Error("admin permission required");
+  if (sheetSyncToken) return sheetSyncToken;
+  const snap = await getDoc(doc(db, "adminSettings", "attendanceSync"));
+  sheetSyncToken = snap.exists() ? String(snap.data().token || "") : "";
+  if (!sheetSyncToken) throw new Error("attendance sync token is not configured");
+  return sheetSyncToken;
+}
 
 function renderChipGroup(containerId, labelMap) {
   const el = document.getElementById(containerId);
@@ -893,10 +908,11 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
   btn.textContent = "시트 읽는 중... | Reading sheet...";
   resultEl.textContent = "";
   try {
+    const token = await getSheetSyncToken();
     const res = await fetch(SHEET_SYNC_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, action: "load" })
+      body: JSON.stringify({ token, action: "load" })
     });
     const result = await res.json();
     if (!result.ok) throw new Error(result.error || "unknown error");
@@ -996,28 +1012,7 @@ document.getElementById("load-from-sheet-btn").addEventListener("click", async (
   }
 });
 
-// ----- 동기화 (앱 → 시트, 미동기화분만 추가) — 상단 퀵버튼/아코디언 버튼 공용 -----
-// ----- 출결 저장 직후 자동으로 그 건 하나만 조용히 시트에 반영 (일반 사용자에겐 아무 표시 안 함) -----
-async function backgroundSyncOne(reportId, reportData) {
-  if (!SHEET_SYNC_URL) return;
-  try {
-    const row = buildSyncRow(reportData);
-    const res = await fetch(SHEET_SYNC_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, action: "append", rows: [row] })
-    });
-    const result = await res.json();
-    if (!result.ok) throw new Error(result.error || "unknown error");
-    await setDoc(doc(db, "attendanceReports", reportId), { synced: true, syncedAt: serverTimestamp() }, { merge: true });
-    // settings 쓰기는 관리자만 가능 — lastSyncAt은 관리자가 수동 동기화할 때만 기록됨
-  } catch (err) {
-    // 실패해도 조용히 넘어감 — synced:false로 남아서 관리자 화면 "동기화 대기 중" 목록에 잡히고,
-    // 수동 "동기화" 버튼으로 나중에 다시 시도됨
-    console.warn("백그라운드 동기화 실패 (나중에 관리자 수동 동기화로 재시도됨):", err);
-  }
-}
-
+// ----- 동기화 (앱 → 시트, 미동기화분만 추가) — 관리자 수동 일괄 처리 -----
 async function performSync(btn, resultEl) {
   if (!SHEET_SYNC_URL) { showToast("Apps Script URL이 설정되지 않았습니다 | Apps Script URL not set"); return; }
 
@@ -1026,6 +1021,7 @@ async function performSync(btn, resultEl) {
   btn.textContent = "미동기화 기록 조회 중... | Checking pending records...";
   if (resultEl) resultEl.textContent = "";
   try {
+    const token = await getSheetSyncToken();
     const snap = await getDocs(query(collection(db, "attendanceReports"), where("synced", "==", false)));
     const pending = [];
     snap.forEach(d => pending.push({ id: d.id, ...d.data() }));
@@ -1035,26 +1031,34 @@ async function performSync(btn, resultEl) {
       return;
     }
     const sorted = sortByStartDate(pending);
-    const rows = sorted.map(buildSyncRow);
+    const records = sorted.map(r => ({ id: r.id, row: buildSyncRow(r) }));
 
     btn.textContent = `시트에 추가하는 중... | Appending to sheet...`;
     const res = await fetch(SHEET_SYNC_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ token: SHEET_SYNC_TOKEN, action: "append", rows })
+      body: JSON.stringify({ token, action: "append", records })
     });
     const result = await res.json();
     if (!result.ok) throw new Error(result.error || "unknown error");
 
-    const now = serverTimestamp();
-    const batch = writeBatch(db);
-    sorted.forEach(r => {
-      batch.update(doc(db, "attendanceReports", r.id), { synced: true, syncedAt: now });
-    });
-    batch.set(doc(db, "settings", "general"), { lastSyncAt: now, lastSyncCount: result.count }, { merge: true });
-    await batch.commit();
+    const processedIds = Array.isArray(result.processedIds) ? result.processedIds : [];
+    if (processedIds.length !== records.length) {
+      throw new Error(`sync acknowledgement mismatch (${processedIds.length}/${records.length})`);
+    }
+    for (let i = 0; i < processedIds.length; i += 400) {
+      const batch = writeBatch(db);
+      processedIds.slice(i, i + 400).forEach(id => {
+        batch.update(doc(db, "attendanceReports", id), { synced: true, syncedAt: serverTimestamp() });
+      });
+      await batch.commit();
+    }
+    await setDoc(doc(db, "settings", "general"), {
+      lastSyncAt: serverTimestamp(), lastSyncCount: result.count
+    }, { merge: true });
 
-    const msg = `동기화 완료: ${result.count}건 시트에 추가됨 | Synced ${result.count} new rows to sheet`;
+    const duplicateCount = result.duplicateCount || 0;
+    const msg = `동기화 완료: 신규 ${result.count}건, 중복 방지 ${duplicateCount}건 | Synced ${result.count}, deduplicated ${duplicateCount}`;
     if (resultEl) resultEl.textContent = msg; else showToast(msg);
     updateLastSyncLabel();
   } catch (err) {
@@ -1104,7 +1108,7 @@ async function updatePendingSyncList() {
     });
   } catch (err) {
     console.error(err);
-    listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">확인 실패 | Failed to check: ${err.message}</div>`;
+    listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">확인 실패 | Failed to check: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -1132,7 +1136,7 @@ async function updateSyncHistoryList() {
     });
   } catch (err) {
     console.error(err);
-    listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">확인 실패 | Failed to check: ${err.message}</div>`;
+    listEl.innerHTML = `<div class="empty-msg" style="padding:10px 0;">확인 실패 | Failed to check: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -1250,13 +1254,13 @@ let filterCls = null;
 
 function renderStudentResults(list, emptyMsg) {
   if (list.length === 0) {
-    resultsEl.innerHTML = `<div class="student-opt">${emptyMsg}</div>`;
+    resultsEl.innerHTML = `<div class="student-opt">${escapeHtml(emptyMsg)}</div>`;
     return;
   }
   resultsEl.innerHTML = list.map(s => `
-    <div class="student-opt" data-email="${s.email}">
-      <span>${s.name}${s.engName ? " · " + s.engName : ""}</span>
-      <span class="sub">${s.grade}${s.cls || ""}</span>
+    <div class="student-opt" data-email="${escapeHtml(s.email)}">
+      <span>${escapeHtml(s.name)}${s.engName ? " · " + escapeHtml(s.engName) : ""}</span>
+      <span class="sub">${escapeHtml(s.grade)}${escapeHtml(s.cls || "")}</span>
     </div>`).join("");
 }
 resultsEl.addEventListener("click", (e) => {
@@ -1294,7 +1298,7 @@ function populateFilterChips() {
   const grades = [...new Set(studentRoster.map(s => s.grade).filter(g => g !== ""))]
     .sort((a, b) => Number(a) - Number(b));
   document.getElementById("grade-filter-group").innerHTML = grades
-    .map(g => `<div class="chip" data-grade="${g}">${g}</div>`).join("");
+    .map(g => `<div class="chip" data-grade="${escapeHtml(g)}">${escapeHtml(g)}</div>`).join("");
   document.getElementById("cls-filter-group").innerHTML = "";
 }
 function updateClsChipsForGrade(grade) {
@@ -1302,7 +1306,7 @@ function updateClsChipsForGrade(grade) {
   filterCls = null;
   if (!grade) { clsGroupEl.innerHTML = ""; return; }
   const clsValues = [...new Set(studentRoster.filter(s => s.grade === grade).map(s => s.cls).filter(c => c !== ""))].sort();
-  clsGroupEl.innerHTML = clsValues.map(c => `<div class="chip" data-cls="${c}">${c}</div>`).join("");
+  clsGroupEl.innerHTML = clsValues.map(c => `<div class="chip" data-cls="${escapeHtml(c)}">${escapeHtml(c)}</div>`).join("");
 }
 document.getElementById("grade-filter-group").addEventListener("click", (e) => {
   const chip = e.target.closest(".chip");
@@ -1378,7 +1382,7 @@ document.getElementById("staff-perm-search").addEventListener("input", async (e)
   matches.forEach(s => {
     const item = document.createElement("div");
     item.className = "student-opt";
-    item.innerHTML = `<span>${name(s)}</span><span class="sub">${s.email} · ${s.role || "-"}${s.homeroom ? " · " + s.homeroom : ""}</span>`;
+    item.innerHTML = `<span>${escapeHtml(name(s))}</span><span class="sub">${escapeHtml(s.email)} · ${escapeHtml(s.role || "-")}${s.homeroom ? " · " + escapeHtml(s.homeroom) : ""}</span>`;
     item.addEventListener("click", () => selectStaffForEdit(s));
     resultsEl.appendChild(item);
   });
@@ -1558,7 +1562,6 @@ document.getElementById("submit-btn").addEventListener("click", async () => {
 
     await batch.commit();
     showToast("저장되었습니다 | Saved");
-    backgroundSyncOne(reportRef.id, reportData); // await 안 함 — 조용히 시도, 실패해도 저장엔 영향 없음
     resetForm();
   } catch (err) {
     console.error(err);
@@ -1615,17 +1618,17 @@ function buildRecordCardEl(r, dateLabel, metaExtra) {
   card.innerHTML = `
     <div class="summary-row">
       <span class="summary-left">
-        <span class="student-name">${nameStr}</span>
-        <span class="sub-inline">${r.grade}${r.cls || ""}</span> ·
-        <span class="type-badge" style="color:${color};">${r.attendanceType}${enBadge ? " | " + enBadge : ""}</span>
+        <span class="student-name">${escapeHtml(nameStr)}</span>
+        <span class="sub-inline">${escapeHtml(r.grade)}${escapeHtml(r.cls || "")}</span> ·
+        <span class="type-badge" style="color:${color};">${escapeHtml(r.attendanceType)}${enBadge ? " | " + escapeHtml(enBadge) : ""}</span>
       </span>
-      <span class="summary-date">${dateLabel}</span>
+      <span class="summary-date">${escapeHtml(dateLabel)}</span>
       <span class="chevron">▾</span>
     </div>
     <div class="record-detail">
-      ${periodStr ? `<div class="meta">${periodStr}</div>` : ""}
-      <div class="reason">${r.reason || ""}</div>
-      ${metaExtra ? `<div class="meta" style="margin-top:6px;">${metaExtra}</div>` : ""}
+      ${periodStr ? `<div class="meta">${escapeHtml(periodStr)}</div>` : ""}
+      <div class="reason">${escapeHtml(r.reason || "")}</div>
+      ${metaExtra ? `<div class="meta" style="margin-top:6px;">${escapeHtml(metaExtra)}</div>` : ""}
     </div>
   `;
   card.querySelector(".summary-row").addEventListener("click", () => card.classList.toggle("expanded"));
@@ -1725,7 +1728,7 @@ async function loadTodayList() {
     items.forEach(r => listEl.appendChild(buildRecordCardEl(r, today)));
   } catch (err) {
     console.error(err);
-    listEl.innerHTML = `<div class="empty-msg">불러오기 실패 | Failed to load: ${err.message}</div>`;
+    listEl.innerHTML = `<div class="empty-msg">불러오기 실패 | Failed to load: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -1823,7 +1826,7 @@ function renderCalendarMode() {
       const contRight = byReportDate.has(`${r.reportId}_${addDays(dateStr, 1)}`);
       const cls = "cal-chip" + (contLeft ? " cont-left" : "") + (contRight ? " cont-right" : "");
       const color = DETAIL_COLOR[r.detail] || "var(--text-2)";
-      return `<div class="${cls}" style="background:${color};">${r.studentName}</div>`;
+      return `<div class="${cls}" style="background:${color};">${escapeHtml(r.studentName)}</div>`;
     }).join("");
 
     cell.innerHTML = `<span class="cal-daynum">${day}</span><div class="cal-chip-list">${chipsHtml}</div>` +
@@ -1899,7 +1902,7 @@ async function loadRecentRecords() {
     if (activeMode === "calendar") renderCalendarMode();
   } catch (err) {
     console.error(err);
-    listEl.innerHTML = `<div class="empty-msg">불러오기 실패 | Failed to load: ${err.message}</div>`;
+    listEl.innerHTML = `<div class="empty-msg">불러오기 실패 | Failed to load: ${escapeHtml(err.message)}</div>`;
   }
 }
 </script>
