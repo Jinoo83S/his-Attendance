@@ -609,8 +609,10 @@ async function getSheetSyncConfig() {
   const token = String(data.token || "").trim();
   const url = String(data.url || "").trim();
   if (!token) throw new Error("attendance sync token is not configured");
-  if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) {
-    throw new Error("attendance sync URL is not configured");
+  if (!url) throw new Error("attendance sync URL is not configured");
+  const validWebAppUrl = /^https:\/\/script\.google\.com\/(?:macros\/s|a\/macros\/[^/]+\/s)\/[^/]+\/exec$/;
+  if (!validWebAppUrl.test(url)) {
+    throw new Error("attendance sync URL must be an Apps Script /exec URL");
   }
   sheetSyncConfig = { token, url };
   return sheetSyncConfig;
@@ -1787,5 +1789,4 @@ async function loadRecentRecords() {
 </script>
 </body>
 </html>
-
 
