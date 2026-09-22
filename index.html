@@ -70,6 +70,8 @@
   }
   .btn-google:hover{ box-shadow:0 1px 4px rgba(0,0,0,.15); }
   .gate-error{ color:var(--absence); font-size:13px; display:none; }
+  .auth-spinner{width:30px;height:30px;border:3px solid #d7dfe5;border-top-color:var(--primary);border-radius:50%;animation:auth-spin .8s linear infinite;}
+  @keyframes auth-spin{to{transform:rotate(360deg)}}
 
   /* ===== 상단바 ===== */
   #topbar{
@@ -231,8 +233,14 @@
 
 <div id="shell">
 
+  <!-- Firebase가 기존 로그인 상태를 확인하는 동안 로그인 폼을 표시하지 않음 -->
+  <div id="auth-loading" class="gate">
+    <div class="auth-spinner"></div>
+    <p>로그인 상태를 확인하고 있습니다.<br>Checking your session...</p>
+  </div>
+
   <!-- 로그인 게이트 -->
-  <div id="gate" class="gate">
+  <div id="gate" class="gate" style="display:none;">
     <div class="gate-badge">출</div>
     <h1>HIS 출결체크 | Attendance Check</h1>
     <p>학교 Google 계정(@his.sc.kr)으로 로그인해주세요.<br>Please sign in with your @his.sc.kr Google account.</p>
@@ -472,7 +480,6 @@
               <a href="https://his-main.web.app/admin.html" target="_blank" rel="noopener" style="text-decoration:none;flex:1;">
                 <button class="submit-btn" type="button" style="width:100%;background:var(--text-2);">교사관리 | Staff</button>
               </a>
-              <button class="submit-btn" id="open-attendance-permission-btn" type="button" style="flex:1;background:#6b4f8a;">교사권한 | Staff Permissions</button>
             </div>
           </div>
         </div>
@@ -597,6 +604,7 @@ const gateEl = document.getElementById("gate");
 const deniedEl = document.getElementById("denied");
 const appWrapEl = document.getElementById("app-wrap");
 const gateErrorEl = document.getElementById("gate-error");
+const authLoadingEl = document.getElementById("auth-loading");
 
 let loginInProgress = false;
 document.getElementById("login-btn").addEventListener("click", () => {
@@ -619,6 +627,7 @@ onAuthStateChanged(auth, async (user) => {
   gateEl.style.display = "none";
   deniedEl.style.display = "none";
   appWrapEl.classList.remove("active");
+  authLoadingEl.style.display = "flex";
 
   if (!user || !user.email || !user.email.endsWith("@" + ALLOWED_DOMAIN)) {
     if (user) {
@@ -626,12 +635,14 @@ onAuthStateChanged(auth, async (user) => {
       gateErrorEl.textContent = "@" + ALLOWED_DOMAIN + " 계정으로만 로그인할 수 있습니다. | Only @" + ALLOWED_DOMAIN + " accounts can sign in.";
       gateErrorEl.style.display = "block";
     }
+    authLoadingEl.style.display = "none";
     gateEl.style.display = "flex";
     return;
   }
 
   const staffSnap = await getDoc(doc(db, "staff", user.email));
   if (!staffSnap.exists()) {
+    authLoadingEl.style.display = "none";
     document.getElementById("denied-email").textContent = user.email;
     deniedEl.style.display = "flex";
     return;
@@ -651,6 +662,7 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   appWrapEl.classList.add("active");
+  authLoadingEl.style.display = "none";
   initTodayDates();
 
   const settingsSnap = await getDoc(doc(db, "settings", "general"));
@@ -746,10 +758,6 @@ document.getElementById("report-fab").addEventListener("click", () => {
     } catch (_) {}
   }
   window.location.href = "report.html";
-});
-
-document.getElementById("open-attendance-permission-btn").addEventListener("click", () => {
-  window.location.href = "https://his-main.web.app/permissions.html";
 });
 
 // ===== Firebase → 구글시트 백업 =====
