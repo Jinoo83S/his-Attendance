@@ -472,11 +472,12 @@
               <a href="https://his-main.web.app/admin.html" target="_blank" rel="noopener" style="text-decoration:none;flex:1;">
                 <button class="submit-btn" type="button" style="width:100%;background:var(--text-2);">교사관리 | Staff</button>
               </a>
+              <button class="submit-btn" id="open-attendance-permission-btn" type="button" style="flex:1;background:#6b4f8a;">출결권한 | Attendance Permission</button>
             </div>
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="staff-permission-card">
           <div class="field">
             <span class="field-label">교사 권한 관리 | Staff Permissions</span>
             <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;">
@@ -780,6 +781,11 @@ document.getElementById("report-fab").addEventListener("click", () => {
     } catch (_) {}
   }
   window.location.href = "report.html";
+});
+
+document.getElementById("open-attendance-permission-btn").addEventListener("click", () => {
+  document.getElementById("staff-permission-card").scrollIntoView({ behavior: "smooth", block: "start" });
+  setTimeout(() => document.getElementById("staff-perm-search").focus(), 350);
 });
 
 // ===== Firebase → 구글시트 백업 =====
