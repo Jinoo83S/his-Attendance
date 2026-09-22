@@ -472,42 +472,7 @@
               <a href="https://his-main.web.app/admin.html" target="_blank" rel="noopener" style="text-decoration:none;flex:1;">
                 <button class="submit-btn" type="button" style="width:100%;background:var(--text-2);">교사관리 | Staff</button>
               </a>
-              <button class="submit-btn" id="open-attendance-permission-btn" type="button" style="flex:1;background:#6b4f8a;">출결권한 | Attendance Permission</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" id="staff-permission-card">
-          <div class="field">
-            <span class="field-label">교사 권한 관리 | Staff Permissions</span>
-            <p style="font-size:12px;color:var(--text-2);margin-bottom:8px;">
-              역할, 홈룸, 출결서류 확인 권한을 빠르게 바꿉니다. 그 외 정보 수정은 위 "교사관리"에서.<br>
-              Quickly change role, homeroom, and attendance-document permission here.
-            </p>
-            <input type="text" id="staff-perm-search" placeholder="이름으로 검색 | Search by name">
-            <div id="staff-perm-results"></div>
-            <div id="staff-perm-editor" style="display:none;margin-top:8px;">
-              <div class="selected-student" id="staff-perm-selected-box" style="margin-bottom:8px;">
-                <div>
-                  <div class="name" id="staff-perm-selected-name"></div>
-                  <div class="sub" id="staff-perm-selected-email"></div>
-                </div>
-                <button class="clear-student" id="staff-perm-clear-btn">변경 | Change</button>
-              </div>
-              <span class="field-label">역할 | Role</span>
-              <div class="chip-group" id="staff-perm-role-group" style="margin-bottom:10px;">
-                <div class="chip" data-role="teacher">교사 | Teacher</div>
-                <div class="chip" data-role="staff">직원 | Staff</div>
-                <div class="chip" data-role="admin">관리자 | Admin</div>
-              </div>
-              <span class="field-label">홈룸 | Homeroom</span>
-              <input type="text" id="staff-perm-homeroom-input" placeholder="예 | e.g. 8A (비우면 없음 | blank = none)" style="margin-bottom:8px;">
-              <label style="display:flex;align-items:center;gap:8px;margin:2px 0 10px;font-size:13px;font-weight:600;">
-                <input type="checkbox" id="staff-perm-attendance-doc" style="width:18px;height:18px;accent-color:var(--primary);">
-                출결서류 확인·변경 권한 | Attendance document permission
-              </label>
-              <button class="submit-btn" id="staff-perm-save-btn" type="button">저장 | Save</button>
-              <div id="staff-perm-result" style="font-size:13px;margin-top:8px;"></div>
+              <button class="submit-btn" id="open-attendance-permission-btn" type="button" style="flex:1;background:#6b4f8a;">교사권한 | Staff Permissions</button>
             </div>
           </div>
         </div>
@@ -784,8 +749,7 @@ document.getElementById("report-fab").addEventListener("click", () => {
 });
 
 document.getElementById("open-attendance-permission-btn").addEventListener("click", () => {
-  document.getElementById("staff-permission-card").scrollIntoView({ behavior: "smooth", block: "start" });
-  setTimeout(() => document.getElementById("staff-perm-search").focus(), 350);
+  window.location.href = "https://his-main.web.app/permissions.html";
 });
 
 // ===== Firebase → 구글시트 백업 =====
@@ -1216,101 +1180,6 @@ document.getElementById("clear-student-btn").addEventListener("click", () => {
   document.getElementById("selected-student-box").style.display = "none";
   document.getElementById("student-picker").style.display = "block";
   updateSubmitState();
-});
-
-// ===== 교사 권한 관리 (role/homeroom 빠른 수정) =====
-let staffRosterCache = null; // 지연 로드 — isAdmin()만 list 가능, 실제로 검색할 때만 읽음
-let selectedStaffPerm = null;
-
-async function ensureStaffRosterLoaded() {
-  if (staffRosterCache) return;
-  const snap = await getDocs(collection(db, "staff"));
-  staffRosterCache = [];
-  snap.forEach(d => staffRosterCache.push({ email: d.id, ...d.data() }));
-}
-
-document.getElementById("staff-perm-search").addEventListener("input", async (e) => {
-  const q = e.target.value.trim();
-  const resultsEl = document.getElementById("staff-perm-results");
-  if (!q) { resultsEl.innerHTML = ""; return; }
-  resultsEl.innerHTML = `<div class="empty-msg" style="padding:8px 0;">검색 중... | Searching...</div>`;
-  await ensureStaffRosterLoaded();
-  const name = s => s.displayName || s.nameKo || s.nameEn || s.email;
-  const matches = staffRosterCache.filter(s =>
-    name(s).toLowerCase().includes(q.toLowerCase()) || s.email.toLowerCase().includes(q.toLowerCase())
-  ).slice(0, 8);
-  if (matches.length === 0) {
-    resultsEl.innerHTML = `<div class="empty-msg" style="padding:8px 0;">검색 결과가 없습니다 | No results found</div>`;
-    return;
-  }
-  resultsEl.innerHTML = "";
-  matches.forEach(s => {
-    const item = document.createElement("div");
-    item.className = "student-opt";
-    item.innerHTML = `<span>${escapeHtml(name(s))}</span><span class="sub">${escapeHtml(s.email)} · ${escapeHtml(s.role || "-")}${s.homeroom ? " · " + escapeHtml(s.homeroom) : ""}</span>`;
-    item.addEventListener("click", () => selectStaffForEdit(s));
-    resultsEl.appendChild(item);
-  });
-});
-
-function selectStaffForEdit(s) {
-  selectedStaffPerm = s;
-  const name = s.displayName || s.nameKo || s.nameEn || s.email;
-  document.getElementById("staff-perm-selected-name").textContent = name;
-  document.getElementById("staff-perm-selected-email").textContent = s.email;
-  document.getElementById("staff-perm-homeroom-input").value = s.homeroom || "";
-  document.getElementById("staff-perm-attendance-doc").checked = s.canManageAttendanceDocuments === true;
-  document.querySelectorAll("#staff-perm-role-group .chip").forEach(c =>
-    c.classList.toggle("selected", c.dataset.role === s.role)
-  );
-  document.getElementById("staff-perm-search").value = "";
-  document.getElementById("staff-perm-results").innerHTML = "";
-  document.getElementById("staff-perm-result").textContent = "";
-  document.getElementById("staff-perm-editor").style.display = "block";
-}
-
-document.getElementById("staff-perm-clear-btn").addEventListener("click", () => {
-  selectedStaffPerm = null;
-  document.getElementById("staff-perm-editor").style.display = "none";
-});
-
-document.getElementById("staff-perm-role-group").addEventListener("click", (e) => {
-  const chip = e.target.closest(".chip");
-  if (!chip) return;
-  document.querySelectorAll("#staff-perm-role-group .chip").forEach(c => c.classList.remove("selected"));
-  chip.classList.add("selected");
-});
-
-document.getElementById("staff-perm-save-btn").addEventListener("click", async () => {
-  if (!selectedStaffPerm) return;
-  const roleChip = document.querySelector("#staff-perm-role-group .chip.selected");
-  if (!roleChip) { showToast("역할을 선택하세요 | Select a role"); return; }
-  const role = roleChip.dataset.role;
-  const homeroom = document.getElementById("staff-perm-homeroom-input").value.trim();
-  const canManageAttendanceDocuments = document.getElementById("staff-perm-attendance-doc").checked;
-  const resultEl = document.getElementById("staff-perm-result");
-  const btn = document.getElementById("staff-perm-save-btn");
-  btn.disabled = true;
-  try {
-    await setDoc(doc(db, "staff", selectedStaffPerm.email), { role, homeroom, canManageAttendanceDocuments }, { merge: true });
-    selectedStaffPerm.role = role;
-    selectedStaffPerm.homeroom = homeroom;
-    selectedStaffPerm.canManageAttendanceDocuments = canManageAttendanceDocuments;
-    const cacheEntry = staffRosterCache?.find(s => s.email === selectedStaffPerm.email);
-    if (cacheEntry) {
-      cacheEntry.role = role;
-      cacheEntry.homeroom = homeroom;
-      cacheEntry.canManageAttendanceDocuments = canManageAttendanceDocuments;
-    }
-    resultEl.style.color = "";
-    resultEl.textContent = "저장됨 | Saved";
-  } catch (err) {
-    console.error(err);
-    resultEl.style.color = "var(--absence)";
-    resultEl.textContent = "저장 실패 | Save failed: " + err.message;
-  } finally {
-    btn.disabled = false;
-  }
 });
 
 // ===== 날짜 =====
